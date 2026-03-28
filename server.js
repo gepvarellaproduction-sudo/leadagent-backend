@@ -68,36 +68,23 @@ app.post('/preview', async (req, res) => {
       ? `Usa questo logo reale: <img src="${logoUrl}" alt="Logo ${nome}" style="max-height:70px;object-fit:contain;">`
       : `Crea un logo testuale elegante con le iniziali in un cerchio colorato con il colore brand del settore.`;
 
-    const prompt = `Sei un web designer esperto italiano. Crea un sito web preview professionale, moderno e visualmente ricco in HTML per questa attività locale. Pagine Sì! lo sta creando come dimostrazione gratuita.
+    const tipiStr = (tipi||[]).slice(0,3).join(', ') || 'attività locale';
+    const prompt = `<!DOCTYPE html> — Genera SOLO questo file HTML completo per: "${nome}", ${tipiStr}, ${indirizzo}, tel: ${telefono||'da inserire'}.
+${logoSection}
+${rating ? 'Rating: '+rating+'/5 ('+nRating+' rec)' : ''}
 
-DATI ATTIVITÀ:
-- Nome: ${nome}
-- Indirizzo: ${indirizzo}
-- Telefono: ${telefono || 'da inserire'}
-- Tipo: ${(tipi||[]).slice(0,3).join(', ') || 'attività locale'}
-- Descrizione: ${descrizione || 'non disponibile'}
-- Rating Google: ${rating ? rating + '/5 (' + nRating + ' recensioni)' : 'non disponibile'}
-- Logo: ${logoSection}
+DESIGN: Google Fonts adatti al settore, palette sofisticata, immagini Unsplash reali (https://images.unsplash.com/photo-ID?w=1200&q=80), responsive, hover effects.
 
-REQUISITI DESIGN — molto importante, NON fare qualcosa da PowerPoint:
-- Google Fonts eleganti e adatti al settore (es. Playfair Display + Lato per ristoranti, Montserrat per sport, ecc.)
-- Design moderno con palette colori sofisticata e coerente al settore
-- Immagini reali da Unsplash con URL diretti (formato: https://images.unsplash.com/photo-XXXXX?w=1200&q=80)
-- Sezioni ben spaziate, ombre sottili (box-shadow), border-radius morbidi, hover effects CSS
-- Completamente responsive (meta viewport + media queries)
-- Animazioni CSS leggere su scroll o hover
+STRUTTURA COMPLETA:
+<header>: banner "🎁 Preview gratuita Pagine Sì! — paginesispa.it" + navbar sticky con logo, menu, CTA
+<section id="hero">: immagine Unsplash fullscreen + overlay + titolo + tagline + 2 bottoni
+<section id="storia">: testo 4-5 righe + foto Unsplash
+<section id="servizi">: 6 card con icone SVG + titolo + descrizione
+<section id="recensioni">: 4 recensioni italiane realistiche con ★★★★★
+<section id="contatti">: indirizzo, telefono, email, orari, iframe maps
+<footer>: nome, P.IVA, social SVG, "Realizzato da Pagine Sì! paginesispa.it"
 
-STRUTTURA:
-1. Banner sottile colorato in cima: "🎁 Preview gratuita di Pagine Sì! — Contattaci per attivare il tuo sito → paginesispa.it"
-2. Navbar sticky con logo/nome, menu (Chi Siamo, Servizi, Recensioni, Contatti), CTA button "Contattaci"
-3. Hero fullscreen con immagine Unsplash reale pertinente, overlay scuro, titolo grande, tagline, 2 CTA buttons
-4. Sezione "La nostra storia" con testo credibile 4-5 righe + foto da Unsplash
-5. Sezione "I nostri servizi" con 6 card, icone SVG inline pertinenti, descrizioni
-6. Sezione "Cosa dicono di noi" con 4 recensioni realistiche (nomi italiani, testo lungo 2-3 righe, stelle ★★★★★)
-7. Sezione contatti: indirizzo, telefono cliccabile, email inventata, orari tipici del settore, iframe Google Maps per "${indirizzo}"
-8. Footer con nome, P.IVA inventata, icone social SVG, "Sito realizzato da Pagine Sì! — paginesispa.it"
-
-RISPONDI SOLO CON CODICE HTML COMPLETO. Inizia con <!DOCTYPE html> senza nessun testo prima.`;
+Scrivi il codice completo senza interruzioni. INIZIA CON <!DOCTYPE html>.`;
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -108,7 +95,7 @@ RISPONDI SOLO CON CODICE HTML COMPLETO. Inizia con <!DOCTYPE html> senza nessun 
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
+        max_tokens: 8000,
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -124,6 +111,9 @@ RISPONDI SOLO CON CODICE HTML COMPLETO. Inizia con <!DOCTYPE html> senza nessun 
     res.status(500).json({ error: err.message });
   }
 });
+
+const { router: proposalRouter } = require('./proposal');
+app.use('/proposal', proposalRouter);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`LeadAgent Backend running on port ${PORT}`));
