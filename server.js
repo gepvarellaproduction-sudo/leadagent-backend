@@ -3,94 +3,43 @@ const cors = require('cors');
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json());
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const GOOGLE_KEY = process.env.GOOGLE_API_KEY;
 
 // Health check
-app.get('/', (req, res) => res.json({ status: 'ok', service: 'LeadAgent Backend â€” Pagine Si!' }));
+app.get('/', (req, res) => res.json({ status: 'ok', service: 'LeadAgent Backend — Pagine Si!' }));
 
-// â”€â”€ /analyze â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-app.post('/analyze', async (req, res) => {
-  try {
-    const { messages, maxTokens } = req.body;
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: maxTokens || 1000,
-        messages
-      })
-    });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// â”€â”€ /places â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Google Places search
 app.post('/places', async (req, res) => {
   try {
     const { query, pageToken } = req.body;
-    let url = `https://places.googleapis.com/v1/places:searchText`;
-    const body = {
-      textQuery: query,
-      languageCode: 'it',
-      regionCode: 'IT',
-      maxResultCount: 20
-    };
+    const body = { textQuery: query, languageCode: 'it', maxResultCount: 20 };
     if (pageToken) body.pageToken = pageToken;
 
-    const response = await fetch(url, {
+    const resp = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': GOOGLE_KEY,
-        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.businessStatus,places.editorialSummary,places.types,places.photos,nextPageToken'
+        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.businessStatus,places.id,places.photos,places.editorialSummary,places.types,nextPageToken'
       },
       body: JSON.stringify(body)
     });
-    const data = await response.json();
-    if (data.error) return res.status(500).json({ error: data.error });
-    res.json({ places: data.places || [], nextPageToken: data.nextPageToken || null });
-  } catch (err) {
+
+    const data = await resp.json();
+    res.json(data);
+  } catch(err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// â”€â”€ /preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-app.post('/preview', async (req, res) => {
+// Analisi mercato AI
+app.post('/analyze', async (req, res) => {
   try {
-    const { nome, indirizzo, telefono, tipi, descrizione, rating, nRating, logoUrl } = req.body;
-    const prompt = `Crea un sito web aziendale professionale e moderno in HTML completo per questa attivitÃ  italiana.
-
-Nome: ${nome}
-Indirizzo: ${indirizzo}
-Telefono: ${telefono || 'da definire'}
-Tipo attivitÃ : ${(tipi || []).join(', ')}
-Descrizione: ${descrizione || 'attivitÃ  locale italiana'}
-Rating Google: ${rating || 'N/D'} (${nRating || 0} recensioni)
-${logoUrl ? `Logo URL: ${logoUrl}` : ''}
-
-Crea un sito COMPLETO con:
-1. Header con nome, nav (Chi siamo, Servizi, Contatti)
-2. Hero section impattante con headline e CTA
-3. Sezione "Chi siamo" con testo credibile
-4. Sezione servizi con 4-6 card
-5. Testimonianze (3-4 clienti con nomi italiani)
-6. Sezione contatti con indirizzo, telefono, orari tipici del settore
-7. Footer con P.IVA inventata, "Sito realizzato da Pagine SÃ¬!"
-
-RISPONDI SOLO CON HTML COMPLETO. Inizia con <!DOCTYPE html>.`;
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const { messages } = req.body;
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -99,72 +48,45 @@ RISPONDI SOLO CON HTML COMPLETO. Inizia con <!DOCTYPE html>.`;
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
-        messages: [{ role: 'user', content: prompt }]
+        max_tokens: 1000,
+        messages
       })
     });
-
-    const data = await response.json();
-    if (data.error) return res.status(500).json({ error: data.error.message });
-
-    let html = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-    html = html.trim().replace(/^```html?\n?/, '').replace(/\n?```$/, '');
-    res.json({ html });
-  } catch (err) {
+    const data = await resp.json();
+    res.json(data);
+  } catch(err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-
-// â”€â”€ /seo-analyze â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-app.post('/seo-analyze', async (req, res) => {
+// Generazione sito preview (nessun timeout!)
+app.post('/preview', async (req, res) => {
   try {
-    const { nome, indirizzo, web, rating, nRating, tipi, categoria, citta } = req.body;
-    if (!nome) return res.status(400).json({ error: 'Lead mancante' });
+    const { nome, indirizzo, telefono, tipi, descrizione, rating, nRating, logoUrl } = req.body;
 
-    const hasSito = !!web;
-    const zona = citta || indirizzo || 'zona';
-    const cat  = categoria || (tipi||[]).join(', ') || 'attivitÃ  locale';
+    const logoSection = logoUrl
+      ? `Usa questo logo reale: <img src="${logoUrl}" alt="Logo ${nome}" style="max-height:70px;object-fit:contain;">`
+      : `Crea un logo testuale elegante con le iniziali in un cerchio colorato con il colore brand del settore.`;
 
-    const prompt = `Sei un esperto di digital marketing italiano. Analizza la presenza digitale di questa attivitÃ  e rispondi SOLO con JSON valido, nessun testo fuori dal JSON.
+    const tipiStr = (tipi||[]).slice(0,3).join(', ') || 'attività locale';
+    const prompt = `<!DOCTYPE html> — Genera SOLO questo file HTML completo per: "${nome}", ${tipiStr}, ${indirizzo}, tel: ${telefono||'da inserire'}.
+${logoSection}
+${rating ? 'Rating: '+rating+'/5 ('+nRating+' rec)' : ''}
 
-AttivitÃ : ${nome}
-Categoria: ${cat}
-Zona: ${zona}
-Sito web: ${web || 'NON PRESENTE'}
-Rating Google: ${rating || 'N/D'} su 5 (${nRating || 0} recensioni)
+DESIGN: Google Fonts adatti al settore, palette sofisticata, immagini Unsplash reali (https://images.unsplash.com/photo-ID?w=1200&q=80), responsive, hover effects.
 
-REGOLE CLASSIFICAZIONE:
-- Social livello: GESTITO (profili attivi, post frequenti, buon engagement), BASE (profili esistenti ma inattivi/rari post), ASSENTE (nessuna presenza rilevabile)
-- Posizionamento Google: ALTO (prime 10 posizioni = pagina 1), MEDIO (pagine 2-10), BASSO (pagina 10 in poi o non trovabile)
-  * Con poche recensioni (<20) e senza sito â†’ quasi sempre BASSO
-  * Con 50+ recensioni e rating >4 â†’ puÃ² essere MEDIO o ALTO
-  * Con sito ottimizzato e molte recensioni â†’ puÃ² essere ALTO
-- Competitor: identifica 3 competitor realistici di zona per ${cat} a ${zona}
+STRUTTURA COMPLETA:
+<header>: banner "🎁 Preview gratuita Pagine Sì! — paginesispa.it" + navbar sticky con logo, menu, CTA
+<section id="hero">: immagine Unsplash fullscreen + overlay + titolo + tagline + 2 bottoni
+<section id="storia">: testo 4-5 righe + foto Unsplash
+<section id="servizi">: 6 card con icone SVG + titolo + descrizione
+<section id="recensioni">: 4 recensioni italiane realistiche con ★★★★★
+<section id="contatti">: indirizzo, telefono, email, orari, iframe maps
+<footer>: nome, P.IVA, social SVG, "Realizzato da Pagine Sì! paginesispa.it"
 
-Rispondi SOLO con questo JSON:
-{
-  "social_livello": "GESTITO|BASE|ASSENTE",
-  "social_dettaglio": "spiegazione breve max 10 parole",
-  "pos_livello": "ALTO|MEDIO|BASSO",
-  "pos_pagina_stimata": "1-10|10-20|20+",
-  "pos_dettaglio": "spiegazione breve max 12 parole",
-  "servizi_consigliati": "lista servizi prioritari max 8 parole",
-  "competitor": [
-    {"nome": "Nome competitor 1 realistico", "pos": "ALTO|MEDIO|BASSO", "social": "GESTITO|BASE|ASSENTE", "rating": "4.2", "vantaggio": "punto di forza vs lead max 6 parole"},
-    {"nome": "Nome competitor 2 realistico", "pos": "ALTO|MEDIO|BASSO", "social": "GESTITO|BASE|ASSENTE", "rating": "3.8", "vantaggio": "punto di forza vs lead max 6 parole"},
-    {"nome": "Nome competitor 3 realistico", "pos": "ALTO|MEDIO|BASSO", "social": "GESTITO|BASE|ASSENTE", "rating": "4.5", "vantaggio": "punto di forza vs lead max 6 parole"}
-  ],
-  "opportunita": [
-    "opportunitÃ  specifica 1 per questo lead",
-    "opportunitÃ  specifica 2",
-    "opportunitÃ  specifica 3"
-  ],
-  "scenario_before": {"sito": ${hasSito ? 40 : 5}, "social": ${(nRating||0) > 30 ? 25 : 5}, "google": ${(nRating||0) > 50 ? 35 : (nRating||0) > 20 ? 20 : 8}},
-  "scenario_after":  {"sito": ${hasSito ? 80 : 85}, "social": 75, "google": 78}
-}`;
+Scrivi il codice completo senza interruzioni. INIZIA CON <!DOCTYPE html>.`;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -172,332 +94,26 @@ Rispondi SOLO con questo JSON:
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1000,
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 8000,
         messages: [{ role: 'user', content: prompt }]
       })
     });
 
-    const data = await response.json();
+    const data = await resp.json();
     if (data.error) return res.status(500).json({ error: data.error.message });
 
-    const raw = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-    const j1 = raw.indexOf('{'), j2 = raw.lastIndexOf('}');
-    if (j1 === -1) return res.status(500).json({ error: 'Risposta AI non valida' });
-    const analisi = JSON.parse(raw.slice(j1, j2 + 1));
+    let html = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    html = html.trim().replace(/^```html?\n?/, '').replace(/\n?```$/, '');
 
-    res.json({ analisi });
-  } catch (err) {
+    res.json({ html });
+  } catch(err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// â”€â”€ /proposal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-app.post('/proposal', async (req, res) => {
-  try {
-    const { lead, consulente, sigleExtra, analisiDigitale } = req.body;
-    if (!lead) return res.status(400).json({ error: 'Lead mancante' });
-
-    const oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
-    const scadenza = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
-
-    // â”€â”€ LISTINO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const LISTINO = {
-      'Si2A-PM':   { n: 'SÃ¬!2Site Atom',                  cat: 'Sito Web',             anno1: 708,   mens: 59   },
-      'Si2RE-PM':  { n: 'SÃ¬!2Site Ready',                 cat: 'Sito Web',             anno1: 1116,  mens: 93   },
-      'Si2S-PM':   { n: 'SÃ¬!2Site Super',                 cat: 'Sito Web',             anno1: 1524,  mens: 127  },
-      'SÃ¬2VN-PM':  { n: 'SÃ¬!2Site Vertical',              cat: 'Sito Web',             anno1: 1692,  mens: 141  },
-      'WDSAL':     { n: 'Scheda Light PagineSi.it',        cat: 'Directory',            anno1: 280,   mens: null },
-      'WDSA':      { n: 'Scheda Azienda PagineSi.it',      cat: 'Directory',            anno1: 456,   mens: 38   },
-      'WDSAV':     { n: 'Scheda Azienda + Video',          cat: 'Directory',            anno1: 490,   mens: null },
-      'GBP':       { n: 'Google Business Profile',         cat: 'Google Maps',          anno1: 211,   mens: null },
-      'GBPP':      { n: 'GBP Plus',                        cat: 'Google Maps',          anno1: 878,   mens: null },
-      'GBPAdv':    { n: 'GBP Advanced',                    cat: 'Google Maps',          anno1: 3455,  mens: null },
-      'ISTQQ':     { n: 'Instatrust QR Code',              cat: 'Reputazione',          anno1: 696,   mens: 58   },
-      'ISTBS':     { n: 'Instatrust Business',             cat: 'Reputazione',          anno1: 828,   mens: 69   },
-      'ISTPS':     { n: 'Instatrust Premium',              cat: 'Reputazione',          anno1: 960,   mens: 80   },
-      'SOC-SET':   { n: 'Social Set Up FB+IG',             cat: 'Social Media',         anno1: 399,   mens: null },
-      'SOC-BAS':   { n: 'Social Basic',                    cat: 'Social Media',         anno1: 1320,  mens: 110  },
-      'SOC-START': { n: 'Social Start',                    cat: 'Social Media',         anno1: 2256,  mens: 188  },
-      'SOC-WEEK':  { n: 'Social Week',                     cat: 'Social Media',         anno1: 3840,  mens: 320  },
-      'SOC-FULL':  { n: 'Social Full',                     cat: 'Social Media',         anno1: 6540,  mens: 545  },
-      'SIN':       { n: 'SEO In Site',                     cat: 'SEO',                  anno1: 1596,  mens: 133  },
-      'SMN':       { n: 'SEO Main',                        cat: 'SEO',                  anno1: 1596,  mens: 133  },
-      'BLS10P':    { n: 'Blog 10 articoli',                cat: 'SEO',                  anno1: 990,   mens: null },
-      'ADW-E':     { n: 'Google Ads Entry',                cat: 'Google Ads',           anno1: 450,   mens: null },
-      'ADW-S':     { n: 'Google Ads Standard',             cat: 'Google Ads',           anno1: 850,   mens: null },
-      'SIADVLS':   { n: 'SÃ¬Adv Locale Setup',              cat: 'Google Ads',           anno1: 200,   mens: null },
-      'SIADVLG':   { n: 'SÃ¬Adv Locale Gestione',          cat: 'Google Ads',           anno1: 3000,  mens: 250  },
-      'Si4LMB':    { n: 'Lead Gen Meta Base',              cat: 'Google Ads',           anno1: 767,   mens: null },
-      'Si4LMM':    { n: 'Lead Gen Meta Medium',            cat: 'Google Ads',           anno1: 933,   mens: null },
-      'VS1':       { n: 'Video Social 1',                  cat: 'Video',                anno1: 290,   mens: null },
-      'VS4':       { n: 'Video Social 4',                  cat: 'Video',                anno1: 790,   mens: null },
-      'VST30':     { n: 'Video Standard 30"',              cat: 'Video',                anno1: 690,   mens: null },
-      'VP':        { n: 'Video Premium',                   cat: 'Video',                anno1: 1900,  mens: null },
-      'AI-ADLSET': { n: 'Assistente Digitale Light Setup', cat: 'AI',                   anno1: 613,   mens: null },
-      'AI-ADLABB': { n: 'Assistente Digitale Light Abb.',  cat: 'AI',                   anno1: 996,   mens: 83   },
-      'AI-ADISET': { n: 'Assistente Digitale Intell.',     cat: 'AI',                   anno1: 863,   mens: null },
-      'EC-SMART':  { n: 'Smart eCommerce',                 cat: 'eCommerce',            anno1: 1332,  mens: 111  },
-      'EC-GLOB':   { n: 'Global eCommerce',                cat: 'eCommerce',            anno1: 2112,  mens: 176  },
-      'Si4BLD':    { n: 'SÃ¬!4Business Lead',               cat: 'Marketing Auto.',      anno1: 912,   mens: 76   },
-      'Si4BEN':    { n: 'SÃ¬!4Business Engage',             cat: 'Marketing Auto.',      anno1: 1140,  mens: 95   },
-    };
-
-    // â”€â”€ SELEZIONE AUTOMATICA PRODOTTI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    function selezionaProdotti(lead, extra) {
-      const hasSito = lead.web && lead.web !== 'N/D';
-      const pocheRec = (lead.nRating || 0) < 20;
-      const ratingBasso = lead.rating && lead.rating < 3.5;
-      const sigle = new Set(extra || []);
-
-      if (!hasSito) sigle.add('Si2RE-PM');
-      if (!hasSito || pocheRec) sigle.add('WDSA');
-      if (pocheRec || ratingBasso) sigle.add('ISTBS');
-      if (pocheRec) sigle.add('GBP');
-      if (!hasSito) sigle.add('SOC-SET');
-      else if (pocheRec) sigle.add('SOC-BAS');
-      if (hasSito && !pocheRec) sigle.add('SIN');
-
-      return [...sigle].filter(s => LISTINO[s]).map(s => ({ s, ...LISTINO[s] }));
-    }
-
-    const prodotti = selezionaProdotti(lead, sigleExtra || []);
-    let totAnno1 = prodotti.reduce((a, p) => a + (p.anno1 || 0), 0);
-    let totMens = prodotti.reduce((a, p) => a + (p.mens || 0), 0);
-
-    // â”€â”€ SEZIONE ANALISI DIGITALE (se presente) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    let analisiSection = '';
-    if (analisiDigitale) {
-      const a = analisiDigitale;
-      const seoColor = a.seo_score >= 60 ? '#2e7d32' : a.seo_score >= 35 ? '#f57f17' : '#c62828';
-      const socColor = a.social_score >= 60 ? '#2e7d32' : a.social_score >= 35 ? '#f57f17' : '#c62828';
-
-      const seoItemsHtml = (a.seo_items || []).map(item => {
-        const icon = item.stato === 'ok' ? 'âœ…' : item.stato === 'warning' ? 'âš ï¸' : 'âŒ';
-        return `<tr>
-          <td style="padding:8px 12px;border-bottom:1px solid #f5f5f5;font-size:11px;font-weight:600;color:#333;">${icon} ${item.label}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #f5f5f5;font-size:11px;color:#666;">${item.valore}</td>
-        </tr>`;
-      }).join('');
-
-      const socialItemsHtml = (a.social_items || []).map(item => {
-        const icon = item.stato === 'ok' ? 'âœ…' : item.stato === 'warning' ? 'âš ï¸' : 'âŒ';
-        return `<tr>
-          <td style="padding:8px 12px;border-bottom:1px solid #f5f5f5;font-size:11px;font-weight:600;color:#333;">${icon} ${item.label}</td>
-          <td style="padding:8px 12px;border-bottom:1px solid #f5f5f5;font-size:11px;color:#666;">${item.valore}</td>
-        </tr>`;
-      }).join('');
-
-      const oppsHtml = (a.opportunita || []).map(opp =>
-        `<div style="display:flex;gap:8px;align-items:flex-start;background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:11px;color:#5d4037;">
-          <span>ðŸ’¡</span><span>${opp}</span>
-        </div>`
-      ).join('');
-
-      analisiSection = `
-      <!-- ANALISI DIGITALE -->
-      <div style="margin-bottom:28px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#aaa;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
-          <span>ðŸ“Š Analisi presenza digitale prevendita</span>
-          <span style="flex:1;height:1px;background:#f0f0f0;display:inline-block;"></span>
-        </div>
-
-        <!-- Score box -->
-        <div style="display:flex;gap:16px;margin-bottom:18px;">
-          <div style="flex:1;background:#f9f9f9;border-radius:10px;padding:16px 20px;border:1px solid #eee;text-align:center;">
-            <div style="font-size:2rem;font-weight:800;color:${seoColor};letter-spacing:-0.04em;">${a.seo_score}<span style="font-size:1rem;font-weight:400;color:#aaa;">/100</span></div>
-            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#aaa;margin-top:4px;">SEO Score</div>
-            <div style="font-size:11px;color:${seoColor};font-weight:600;margin-top:2px;">${a.seo_livello ? a.seo_livello.toUpperCase() : ''}</div>
-          </div>
-          <div style="flex:1;background:#f9f9f9;border-radius:10px;padding:16px 20px;border:1px solid #eee;text-align:center;">
-            <div style="font-size:2rem;font-weight:800;color:${socColor};letter-spacing:-0.04em;">${a.social_score}<span style="font-size:1rem;font-weight:400;color:#aaa;">/100</span></div>
-            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#aaa;margin-top:4px;">Social Score</div>
-            <div style="font-size:11px;color:${socColor};font-weight:600;margin-top:2px;">${a.social_livello ? a.social_livello.toUpperCase() : ''}</div>
-          </div>
-        </div>
-
-        <!-- SEO Items -->
-        <div style="margin-bottom:16px;">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#999;margin-bottom:8px;">ðŸ” SEO e presenza online</div>
-          <table style="width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;border:1px solid #eee;">
-            ${seoItemsHtml}
-          </table>
-        </div>
-
-        <!-- Social Items -->
-        <div style="margin-bottom:16px;">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#999;margin-bottom:8px;">ðŸ“± Social Media</div>
-          <table style="width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;border:1px solid #eee;">
-            ${socialItemsHtml}
-          </table>
-        </div>
-
-        <!-- OpportunitÃ  -->
-        ${oppsHtml ? `<div>
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#999;margin-bottom:8px;">ðŸ’¡ OpportunitÃ  identificate</div>
-          ${oppsHtml}
-        </div>` : ''}
-      </div>`;
-    }
-
-    // â”€â”€ RIGHE PRODOTTI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const righeHTML = prodotti.map(p => `
-      <tr>
-        <td style="padding:10px 14px;border-bottom:1px solid #f5f5f5;font-size:11px;font-family:monospace;font-weight:700;color:#E8001C;">${p.s}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f5f5f5;font-size:12px;color:#333;font-weight:500;">${p.n}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f5f5f5;font-size:11px;color:#888;">${p.cat}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f5f5f5;font-size:12px;font-weight:600;text-align:right;color:#333;">â‚¬ ${(p.anno1 || 0).toLocaleString('it-IT')}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f5f5f5;font-size:11px;text-align:right;color:#888;">${p.mens ? 'â‚¬ ' + p.mens + '/mese' : 'â€”'}</td>
-      </tr>`).join('');
-
-    // â”€â”€ SEGNALI LEAD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const segnaliHTML = [];
-    if (!lead.web || lead.web === 'N/D') segnaliHTML.push('<span style="display:inline-block;background:#fff0f2;color:#E8001C;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;margin:2px;">âŒ Nessun sito web</span>');
-    if ((lead.nRating || 0) < 20) segnaliHTML.push(`<span style="display:inline-block;background:#fff8e1;color:#f57f17;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;margin:2px;">âš ï¸ ${lead.nRating || 0} recensioni</span>`);
-    if (lead.rating && lead.rating < 3.5) segnaliHTML.push(`<span style="display:inline-block;background:#fff0f2;color:#E8001C;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;margin:2px;">âš ï¸ Rating ${lead.rating}/5</span>`);
-    if (lead.rating && lead.rating >= 4.0) segnaliHTML.push(`<span style="display:inline-block;background:#e8f5e9;color:#2e7d32;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;margin:2px;">âœ… Rating ${lead.rating}/5</span>`);
-
-    // â”€â”€ HTML PROPOSTA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const html = `<!DOCTYPE html>
-<html lang="it">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Proposta â€” ${lead.nome}</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',sans-serif;background:#f4f4f4;color:#1a1a1a;font-size:11pt}
-.page{max-width:860px;margin:0 auto;background:white;box-shadow:0 4px 40px rgba(0,0,0,0.12)}
-.cover{background:#111;color:white;padding:52px 52px 40px;position:relative;overflow:hidden}
-.cover-bg1{position:absolute;top:-60px;right:-60px;width:260px;height:260px;background:#E8001C;border-radius:50%;opacity:0.1}
-.cover-bg2{position:absolute;bottom:-30px;left:120px;width:100px;height:100px;background:#E8001C;border-radius:50%;opacity:0.06}
-.logo-row{display:flex;align-items:center;gap:12px;margin-bottom:40px}
-.logo-sq{width:40px;height:40px;background:#E8001C;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:white;letter-spacing:-1px}
-.logo-name{font-size:15px;font-weight:700;color:white}
-.logo-sub{font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:0.06em;text-transform:uppercase}
-.cover h1{font-size:2.2rem;font-weight:800;letter-spacing:-0.04em;line-height:1.1;margin-bottom:0.5rem}
-.cover h1 em{font-style:normal;color:#E8001C}
-.cover-sub{font-size:0.9rem;color:rgba(255,255,255,0.4);font-weight:300}
-.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #f0f0f0}
-.meta-item{padding:16px 20px;border-right:1px solid #f0f0f0}
-.meta-item:last-child{border-right:none}
-.meta-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#aaa;margin-bottom:4px}
-.meta-value{font-size:13px;font-weight:600;color:#1a1a1a}
-.body{padding:32px 48px 40px}
-.section-title{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#aaa;margin-bottom:14px;display:flex;align-items:center;gap:8px}
-.section-title::after{content:'';flex:1;height:1px;background:#f0f0f0}
-.az-card{background:#f9f9f9;border-radius:10px;padding:18px 20px;margin-bottom:24px}
-.az-nome{font-size:16px;font-weight:700;color:#1a1a1a;margin-bottom:4px}
-.az-addr{font-size:12px;color:#888;margin-bottom:12px}
-.az-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.az-row{display:flex;gap:8px;font-size:11px}
-.az-lbl{color:#aaa;min-width:70px}
-.az-val{color:#333;font-weight:500}
-.pitch{background:#fff8e1;border-left:3px solid #E8001C;padding:10px 14px;border-radius:0 6px 6px 0;font-size:12px;color:#5d4037;margin-bottom:24px}
-.table-wrap{margin-bottom:24px;border-radius:8px;overflow:hidden;border:1px solid #eee}
-.totale{background:#E8001C;color:white;border-radius:8px;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
-.tot-label{font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;opacity:0.7}
-.tot-amount{font-size:1.6rem;font-weight:800;letter-spacing:-0.04em}
-.tot-mens{text-align:right}
-.edit-note{background:#f0f7ff;border:1px solid #bee3f8;border-radius:8px;padding:10px 14px;font-size:11px;color:#2b6cb0;margin-bottom:20px}
-.foot{margin-top:28px;padding-top:16px;border-top:1px solid #eee;display:flex;justify-content:space-between;font-size:9px;color:#bbb}
-.foot strong{color:#E8001C}
-@media print{body{background:white;print-color-adjust:exact;-webkit-print-color-adjust:exact}.page{box-shadow:none;max-width:100%}.edit-note{display:none}}
-</style>
-</head>
-<body>
-<div class="page">
-
-  <div class="cover">
-    <div class="cover-bg1"></div>
-    <div class="cover-bg2"></div>
-    <div class="logo-row">
-      <div class="logo-sq">P!</div>
-      <div>
-        <div class="logo-name">Pagine SÃ¬!</div>
-        <div class="logo-sub">Human Digital Company</div>
-      </div>
-    </div>
-    <h1>Proposta Digitale<br><em>Personalizzata</em></h1>
-    <div class="cover-sub">Comunicazione e Marketing Digitale su misura</div>
-  </div>
-
-  <div class="meta">
-    <div class="meta-item"><div class="meta-label">Preparata per</div><div class="meta-value">${lead.nome}</div></div>
-    <div class="meta-item"><div class="meta-label">Data</div><div class="meta-value">${oggi}</div></div>
-    <div class="meta-item"><div class="meta-label">Consulente</div><div class="meta-value">${consulente || 'Consulente Pagine SÃ¬!'}</div></div>
-    <div class="meta-item"><div class="meta-label">Valida fino al</div><div class="meta-value">${scadenza}</div></div>
-  </div>
-
-  <div class="body">
-
-    <div class="edit-note">
-      âœï¸ <strong>Proposta modificabile</strong> â€” Clicca sui valori per modificarli Â· <strong>Cmd+P â†’ Salva come PDF</strong> per esportare
-    </div>
-
-    <!-- AZIENDA -->
-    <div class="section-title">Azienda</div>
-    <div class="az-card">
-      <div class="az-nome">${lead.nome}</div>
-      <div class="az-addr">ðŸ“ ${lead.indirizzo}</div>
-      <div class="az-grid">
-        <div class="az-row"><span class="az-lbl">Telefono</span><span class="az-val">${lead.telefono !== 'N/D' ? lead.telefono : 'â€”'}</span></div>
-        <div class="az-row"><span class="az-lbl">Sito web</span><span class="az-val">${lead.web !== 'N/D' ? lead.web : 'Non presente'}</span></div>
-        <div class="az-row"><span class="az-lbl">Rating Google</span><span class="az-val">${lead.rating ? `${lead.rating}/5 (${lead.nRating} rec.)` : 'â€”'}</span></div>
-        <div class="az-row"><span class="az-lbl">Stato</span><span class="az-val">${lead.status || 'Attivo'}</span></div>
-      </div>
-      ${segnaliHTML.length ? `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px;">${segnaliHTML.join('')}</div>` : ''}
-    </div>
-
-    <!-- DIAGNOSI -->
-    <div class="section-title">Diagnosi digitale</div>
-    <div class="pitch">${lead.pitch || 'OpportunitÃ  di crescita digitale identificata.'}</div>
-
-    ${analisiSection}
-
-    <!-- PROPOSTA -->
-    <div class="section-title">Soluzione proposta</div>
-    <div class="table-wrap">
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <thead>
-          <tr style="background:#f9f9f9;">
-            <th style="padding:10px 14px;text-align:left;font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.08em;">Sigla</th>
-            <th style="padding:10px 14px;text-align:left;font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.08em;">Soluzione</th>
-            <th style="padding:10px 14px;text-align:left;font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.08em;">Categoria</th>
-            <th style="padding:10px 14px;text-align:right;font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.08em;">Anno 1</th>
-            <th style="padding:10px 14px;text-align:right;font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.08em;">Mensile</th>
-          </tr>
-        </thead>
-        <tbody>${righeHTML}</tbody>
-      </table>
-    </div>
-
-    <div class="totale">
-      <div>
-        <div class="tot-label">Investimento totale</div>
-        <div class="tot-amount">â‚¬ ${totAnno1.toLocaleString('it-IT')}</div>
-        <div style="font-size:10px;opacity:0.6;margin-top:2px;">Anno 1 Â· IVA esclusa</div>
-      </div>
-      ${totMens ? `<div class="tot-mens"><div class="tot-label">Canone mensile</div><div class="tot-amount">â‚¬ ${totMens.toLocaleString('it-IT')}/mese</div></div>` : ''}
-    </div>
-
-    <div class="foot">
-      <div><strong>Pagine SÃ¬! SpA</strong> Â· P.zza San Giovanni Decollato 1, 05100 Terni Â· paginesispa.it</div>
-      <div>Prezzi IVA esclusa Â· Proposta valida 30 giorni Â· ${oggi}</div>
-    </div>
-
-  </div>
-</div>
-</body>
-</html>`;
-
-    res.json({ html, totale: totAnno1, prodotti });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+const { router: proposalRouter } = require('./proposal');
+app.use('/proposal', proposalRouter);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`LeadAgent Backend running on port ${PORT}`));
