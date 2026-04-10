@@ -818,29 +818,29 @@ function generaAnalisiDati(lead, fatturato) {
     posCommento = 'Nessun sito e poche recensioni: invisibile sui motori di ricerca';
   } else if (!hasSito && nRating < 30) {
     posStimata = 65; posRange = '50-80'; posLivello = 'BASSO';
-    posCommento = 'Senza sito web il posizionamento organico e' molto limitato';
+    posCommento = 'Senza sito web il posizionamento organico e molto limitato';
   } else if (!hasSito) {
     posStimata = 42; posRange = '30-55'; posLivello = 'BASSO';
     posCommento = 'Presenza Google Maps ma nessun sito penalizza il posizionamento';
   } else if (nRating >= 100 && rating >= 4.2) {
     posStimata = 8; posRange = '5-15'; posLivello = 'ALTO';
-    posCommento = 'Buona autorita' locale grazie a recensioni e sito presente';
+    posCommento = 'Buona autorita locale grazie a recensioni e sito presente';
   } else if (nRating >= 50 && rating >= 4.0) {
     posStimata = 22; posRange = '15-30'; posLivello = 'MEDIO';
-    posCommento = 'Visibilita' discreta, margine di miglioramento con SEO';
+    posCommento = 'Visibilita discreta, margine di miglioramento con SEO';
   } else if (nRating >= 20) {
     posStimata = 38; posRange = '25-50'; posLivello = 'MEDIO';
     posCommento = 'Posizionamento nella media, ottimizzabile con strategia SEO';
   } else {
     posStimata = 62; posRange = '45-80'; posLivello = 'BASSO';
-    posCommento = 'Poche recensioni e sito non ottimizzato limitano la visibilita'';
+    posCommento = 'Poche recensioni e sito non ottimizzato limitano la visibilita';
   }
 
   // Social
   let socialLivello, socialCommento;
   if (hasSocial) {
     socialLivello = 'BASE';
-    socialCommento = 'Profilo ' + (isFb ? 'Facebook' : isIg ? 'Instagram' : 'Social') + ' trovato - attivita' da verificare';
+    socialCommento = 'Profilo ' + (isFb ? 'Facebook' : isIg ? 'Instagram' : 'Social') + ' trovato - da verificare';
   } else {
     socialLivello = 'ASSENTE';
     socialCommento = 'Nessun profilo social rilevato tramite Google Maps';
@@ -856,11 +856,11 @@ function generaAnalisiDati(lead, fatturato) {
 
   // Opportunita' basate sui dati reali
   const opportunita = [];
-  if (!hasSito) opportunita.push('Creazione sito web: primo passo per comparire su "' + keywordSEO + '"');
-  else if (posLivello !== 'ALTO') opportunita.push('Ottimizzazione SEO per "' + keywordSEO + '": salire dalla posizione ' + posStimata + ' alle prime 10');
+  if (!hasSito) opportunita.push('Creazione sito web: primo passo per comparire su ' + keywordSEO);
+  else if (posLivello !== 'ALTO') opportunita.push('Ottimizzazione SEO per ' + keywordSEO + ': salire dalla posizione ' + posStimata + ' alle prime 10');
   if (!hasSocial) opportunita.push('Apertura profili Facebook e Instagram: presenza social da zero');
-  else opportunita.push('Potenziamento attivita' social: da profilo statico a community attiva');
-  if (nRating < 50) opportunita.push('Piano di raccolta recensioni: aumentare da ' + nRating + ' a 50+ per migliorare visibilita' Google Maps');
+  else opportunita.push('Potenziamento attivita social: da profilo statico a community attiva');
+  if (nRating < 50) opportunita.push('Piano di raccolta recensioni: aumentare da ' + nRating + ' a 50+ per migliorare visibilita Google Maps');
 
   return {
     pos_stimata: posStimata,
@@ -914,7 +914,7 @@ async function cercaCompetitorReali(lead) {
         const hasSitoComp = !!p.websiteUri;
         const nRatingComp = p.userRatingCount || 0;
         const ratingComp = p.rating || 0;
-        // Posizione Google stimata in base all'ordine nei risultati
+        // Posizione Google stimata in base all ordine nei risultati
         const posizioneGoogle = idx + 1;
         const socialComp = hasSitoComp && nRatingComp >= 50 ? 'GESTITO' : hasSitoComp ? 'BASE' : 'ASSENTE';
         return {
