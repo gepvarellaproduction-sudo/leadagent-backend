@@ -251,22 +251,22 @@ function buildAnalisiProposta(analisiData) {
   // Competitor
   let competitorHTML = '';
   if (a.competitor && a.competitor.length) {
-    const cells = a.competitor.map(c => {
-      const cPosCls = c.pos_google <= 10 ? 'background:#e8f5e9;color:#2e7d32' : c.pos_google <= 30 ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
+    const cells = a.competitor.map((c, idx) => {
+      const cPosCls = idx === 0 ? 'background:#e8f5e9;color:#2e7d32' : idx === 1 ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
       const cSocCls = c.social === 'GESTITO' ? 'background:#e8f5e9;color:#2e7d32' : c.social === 'BASE' ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
-      return `<td style="padding:10px;border:1px solid #eee;border-radius:8px;vertical-align:top;width:33%;">
-        <div style="font-size:10.5pt;font-weight:700;color:#1a1a1a;margin-bottom:8px;">${c.nome}</div>
-        <div style="margin-bottom:4px;font-size:9pt;color:#777;">Posiz. Google: <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-weight:700;font-size:8pt;${cPosCls}">#${c.pos_google}</span></div>
-        <div style="margin-bottom:4px;font-size:9pt;color:#777;">Social: <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-weight:700;font-size:8pt;${cSocCls}">${c.social}</span></div>
-        <div style="margin-bottom:6px;font-size:9pt;color:#777;">Rating: <strong>${c.rating || 'N/D'}</strong></div>
-        <div style="font-size:8.5pt;color:#aaa;font-style:italic;">âœ“ ${c.punto_forza || ''}</div>
-      </td>`;
+      return '<td style="padding:10px;border:1px solid #eee;border-radius:8px;vertical-align:top;width:33%;">' +
+        '<div style="font-size:10.5pt;font-weight:700;color:#1a1a1a;margin-bottom:8px;">' + c.nome + '</div>' +
+        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Posiz. ricerca: <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-weight:700;font-size:8pt;' + cPosCls + '">#' + c.pos_google + ' risultato</span></div>' +
+        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Rating: <strong>' + (c.rating || 'N/D') + '</strong> (' + c.n_recensioni + ' rec.)</div>' +
+        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Sito web: <strong>' + (c.ha_sito ? 'Si' : 'No') + '</strong></div>' +
+        '<div style="margin-bottom:6px;font-size:9pt;color:#777;">Social: <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-weight:700;font-size:8pt;' + cSocCls + '">' + c.social + '</span></div>' +
+        '<div style="font-size:8.5pt;color:#aaa;font-style:italic;">Punto forza: ' + (c.punto_forza || '') + '</div>' +
+        '</td>';
     }).join('<td style="width:8px;"></td>');
-    competitorHTML = `
-    <div style="margin-bottom:20px;">
-      <div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">Analisi 3 Competitor di Zona</div>
-      <table style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>${cells}</tr></table>
-    </div>`;
+    competitorHTML = '<div style="margin-bottom:20px;">' +
+      '<div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">Competitor di Zona (dati Google Maps reali)</div>' +
+      '<table style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>' + cells + '</tr></table>' +
+      '</div>';
   }
 
   // OpportunitÃ 
@@ -798,91 +798,140 @@ function esportaPDF() {
 }
 
 // Endpoint
-// Genera analisi approfondita via AI al momento della proposta
-async function generaAnalisiAI(lead, fatturato) {
-  const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-  const hasSito = lead.web && lead.web !== 'N/D';
-  const keywordSEO = lead.categoria && lead.citta
-    ? `${lead.categoria} ${lead.citta}`
-    : lead.indirizzo || 'zona locale';
-  const hasSocial = !!lead.socialLink;
-  const socialPiattaforma = lead.socialLink
-    ? (lead.socialLink.includes('instagram') ? 'Instagram' : lead.socialLink.includes('facebook') ? 'Facebook' : 'Social')
-    : null;
+// Genera analisi approfondita â€” logica deterministica, nessuna AI
+function generaAnalisiDati(lead, fatturato) {
+  const hasSito = !!(lead.web && lead.web !== 'N/D');
+  const nRating = lead.nRating || 0;
+  const rating = lead.rating || 0;
+  const socialLink = lead.socialLink || null;
+  const hasSocial = !!socialLink;
+  const isFb = socialLink && socialLink.includes('facebook');
+  const isIg = socialLink && socialLink.includes('instagram');
+  const categoria = lead.categoria || 'attivita';
+  const citta = lead.citta || lead.indirizzo || 'zona';
+  const keywordSEO = categoria + ' ' + citta;
 
-  // Stima posizione Google basata su dati reali disponibili
-  let posStimata, posRange;
-  if (!hasSito && (lead.nRating || 0) < 10) { posStimata = 95; posRange = '80-100+'; }
-  else if (!hasSito && (lead.nRating || 0) < 30) { posStimata = 70; posRange = '50-80'; }
-  else if (!hasSito) { posStimata = 45; posRange = '30-60'; }
-  else if ((lead.nRating || 0) >= 100 && lead.rating >= 4.2) { posStimata = 8; posRange = '5-15'; }
-  else if ((lead.nRating || 0) >= 50 && lead.rating >= 4.0) { posStimata = 22; posRange = '15-30'; }
-  else if ((lead.nRating || 0) >= 20) { posStimata = 38; posRange = '25-50'; }
-  else { posStimata = 60; posRange = '40-80'; }
+  // Posizione stimata Google â€” basata su dati reali
+  let posStimata, posRange, posLivello, posCommento;
+  if (!hasSito && nRating < 10) {
+    posStimata = 95; posRange = '80-100+'; posLivello = 'BASSO';
+    posCommento = 'Nessun sito e poche recensioni: invisibile sui motori di ricerca';
+  } else if (!hasSito && nRating < 30) {
+    posStimata = 65; posRange = '50-80'; posLivello = 'BASSO';
+    posCommento = 'Senza sito web il posizionamento organico e' molto limitato';
+  } else if (!hasSito) {
+    posStimata = 42; posRange = '30-55'; posLivello = 'BASSO';
+    posCommento = 'Presenza Google Maps ma nessun sito penalizza il posizionamento';
+  } else if (nRating >= 100 && rating >= 4.2) {
+    posStimata = 8; posRange = '5-15'; posLivello = 'ALTO';
+    posCommento = 'Buona autorita' locale grazie a recensioni e sito presente';
+  } else if (nRating >= 50 && rating >= 4.0) {
+    posStimata = 22; posRange = '15-30'; posLivello = 'MEDIO';
+    posCommento = 'Visibilita' discreta, margine di miglioramento con SEO';
+  } else if (nRating >= 20) {
+    posStimata = 38; posRange = '25-50'; posLivello = 'MEDIO';
+    posCommento = 'Posizionamento nella media, ottimizzabile con strategia SEO';
+  } else {
+    posStimata = 62; posRange = '45-80'; posLivello = 'BASSO';
+    posCommento = 'Poche recensioni e sito non ottimizzato limitano la visibilita'';
+  }
 
-  const prompt = `Sei un esperto di digital marketing italiano. Genera un'analisi prevendita dettagliata per questa attivitÃ . Rispondi SOLO con JSON valido.
+  // Social
+  let socialLivello, socialCommento;
+  if (hasSocial) {
+    socialLivello = 'BASE';
+    socialCommento = 'Profilo ' + (isFb ? 'Facebook' : isIg ? 'Instagram' : 'Social') + ' trovato - attivita' da verificare';
+  } else {
+    socialLivello = 'ASSENTE';
+    socialCommento = 'Nessun profilo social rilevato tramite Google Maps';
+  }
 
-AttivitÃ : ${lead.nome}
-Categoria: ${lead.categoria || 'attivitÃ  locale'}
-Zona: ${lead.citta || lead.indirizzo}
-Sito web: ${lead.web && lead.web !== 'N/D' ? lead.web : 'ASSENTE'}
-${hasSocial ? `Profilo social: ${socialPiattaforma} â€” ${lead.socialLink}` : 'Profili social: non rilevati'}
-Rating Google: ${lead.rating || 'N/D'}/5 (${lead.nRating || 0} recensioni)
-Parola chiave principale: "${keywordSEO}"
-Posizione stimata Google per "${keywordSEO}": circa ${posStimata}Âª (range ${posRange})
-Fatturato stimato: â‚¬${fatturato.min.toLocaleString('it-IT')} â€“ â‚¬${fatturato.max.toLocaleString('it-IT')}
+  // Scenario before/after
+  const scenarioBefore = {
+    sito: hasSito ? 40 : 5,
+    social: hasSocial ? 20 : 5,
+    google: Math.max(5, 100 - posStimata)
+  };
+  const scenarioAfter = { sito: hasSito ? 82 : 87, social: 76, google: 84 };
 
-Rispondi SOLO con questo JSON:
-{
-  "pos_stimata": ${posStimata},
-  "pos_range": "${posRange}",
-  "pos_keyword": "${keywordSEO}",
-  "pos_livello": "${posStimata <= 10 ? 'ALTO' : posStimata <= 30 ? 'MEDIO' : 'BASSO'}",
-  "pos_commento": "frase di 15 parole max che spiega il posizionamento attuale e il potenziale",
-  "social_livello": "${hasSocial ? 'BASE' : 'ASSENTE'}",
-  "social_link_fb": ${hasSocial && lead.socialLink && lead.socialLink.includes('facebook') ? `"${lead.socialLink}"` : 'null'},
-  "social_link_ig": ${hasSocial && lead.socialLink && lead.socialLink.includes('instagram') ? `"${lead.socialLink}"` : 'null'},
-  "social_commento": "valutazione presenza social in 10 parole max",
-  "competitor": [
-    {"nome": "nome realistico competitor 1 per ${lead.categoria||'settore'} a ${lead.citta||'zona'}", "pos_google": 3, "social": "GESTITO", "rating": "4.5", "punto_forza": "cosa fanno meglio max 5 parole"},
-    {"nome": "nome realistico competitor 2", "pos_google": 12, "social": "BASE", "rating": "4.1", "punto_forza": "cosa fanno meglio max 5 parole"},
-    {"nome": "nome realistico competitor 3", "pos_google": 28, "social": "ASSENTE", "rating": "3.8", "punto_forza": "cosa fanno meglio max 5 parole"}
-  ],
-  "opportunita": [
-    "opportunitÃ  concreta 1 legata al posizionamento per \\"${keywordSEO}\\"",
-    "opportunitÃ  concreta 2 legata alla presenza social",
-    "opportunitÃ  concreta 3 legata alla reputazione e recensioni"
-  ],
-  "scenario_before": {"sito": ${hasSito ? 40 : 5}, "social": ${hasSocial ? 20 : 5}, "google": ${Math.max(5, 100 - posStimata)}},
-  "scenario_after":  {"sito": ${hasSito ? 82 : 87}, "social": 76, "google": 84}
-}`;
+  // Opportunita' basate sui dati reali
+  const opportunita = [];
+  if (!hasSito) opportunita.push('Creazione sito web: primo passo per comparire su "' + keywordSEO + '"');
+  else if (posLivello !== 'ALTO') opportunita.push('Ottimizzazione SEO per "' + keywordSEO + '": salire dalla posizione ' + posStimata + ' alle prime 10');
+  if (!hasSocial) opportunita.push('Apertura profili Facebook e Instagram: presenza social da zero');
+  else opportunita.push('Potenziamento attivita' social: da profilo statico a community attiva');
+  if (nRating < 50) opportunita.push('Piano di raccolta recensioni: aumentare da ' + nRating + ' a 50+ per migliorare visibilita' Google Maps');
+
+  return {
+    pos_stimata: posStimata,
+    pos_range: posRange,
+    pos_keyword: keywordSEO,
+    pos_livello: posLivello,
+    pos_commento: posCommento,
+    social_livello: socialLivello,
+    social_link_fb: isFb ? socialLink : null,
+    social_link_ig: isIg ? socialLink : null,
+    social_commento: socialCommento,
+    competitor: [],
+    opportunita: opportunita,
+    scenario_before: scenarioBefore,
+    scenario_after: scenarioAfter
+  };
+}
+
+
+
+// Cerca competitor reali su Google Maps
+async function cercaCompetitorReali(lead) {
+  const GOOGLE_KEY = process.env.GOOGLE_API_KEY;
+  const categoria = lead.categoria || '';
+  const citta = lead.citta || '';
+  if (!categoria || !citta || !GOOGLE_KEY) return [];
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const query = categoria + ' ' + citta + ' Italia';
+    const resp = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 900, messages: [{ role: 'user', content: prompt }] })
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': GOOGLE_KEY,
+        'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.formattedAddress'
+      },
+      body: JSON.stringify({ textQuery: query, languageCode: 'it', maxResultCount: 8 })
     });
     const data = await resp.json();
-    if (data.error) throw new Error(data.error.message);
-    const raw = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-    const j1 = raw.indexOf('{'), j2 = raw.lastIndexOf('}');
-    return JSON.parse(raw.slice(j1, j2 + 1));
+    if (!data.places) return [];
+
+    // Filtra il lead stesso e prendi i primi 3 competitor
+    const nomeLeadNorm = (lead.nome || '').toLowerCase().trim();
+    const competitor = data.places
+      .filter(p => {
+        const nome = (p.displayName && p.displayName.text || '').toLowerCase().trim();
+        return nome && nome !== nomeLeadNorm && !nome.includes(nomeLeadNorm.slice(0, 6));
+      })
+      .slice(0, 3)
+      .map((p, idx) => {
+        const hasSitoComp = !!p.websiteUri;
+        const nRatingComp = p.userRatingCount || 0;
+        const ratingComp = p.rating || 0;
+        // Posizione Google stimata in base all'ordine nei risultati
+        const posizioneGoogle = idx + 1;
+        const socialComp = hasSitoComp && nRatingComp >= 50 ? 'GESTITO' : hasSitoComp ? 'BASE' : 'ASSENTE';
+        return {
+          nome: p.displayName && p.displayName.text || 'N/D',
+          pos_google: posizioneGoogle,
+          rating: ratingComp ? ratingComp.toFixed(1) : 'N/D',
+          n_recensioni: nRatingComp,
+          ha_sito: hasSitoComp,
+          social: socialComp,
+          punto_forza: ratingComp >= 4.3 ? 'Ottima reputazione online' :
+                       nRatingComp >= 100 ? 'Alto volume di recensioni' :
+                       hasSitoComp ? 'Presenza web attiva' : 'Visibilita\' Maps locale'
+        };
+      });
+    return competitor;
   } catch(e) {
-    // Fallback se AI fallisce â€” dati stimati senza AI
-    return {
-      pos_stimata: posStimata, pos_range: posRange, pos_keyword: keywordSEO,
-      pos_livello: posStimata <= 10 ? 'ALTO' : posStimata <= 30 ? 'MEDIO' : 'BASSO',
-      pos_commento: `Posizionamento stimato per "${keywordSEO}" in base a recensioni e presenza web`,
-      social_livello: hasSocial ? 'BASE' : 'ASSENTE',
-      social_link_fb: hasSocial && lead.socialLink && lead.socialLink.includes('facebook') ? lead.socialLink : null,
-      social_link_ig: hasSocial && lead.socialLink && lead.socialLink.includes('instagram') ? lead.socialLink : null,
-      social_commento: hasSocial ? `Profilo ${socialPiattaforma} trovato` : 'Nessun profilo social rilevato',
-      competitor: [],
-      opportunita: ['Migliorare il posizionamento locale', 'Aumentare le recensioni Google', 'Sviluppare presenza social'],
-      scenario_before: { sito: hasSito ? 40 : 5, social: hasSocial ? 20 : 5, google: Math.max(5, 100 - posStimata) },
-      scenario_after: { sito: hasSito ? 82 : 87, social: 76, google: 84 }
-    };
+    return [];
   }
 }
 
@@ -904,9 +953,12 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Genera sempre l'analisi approfondita al momento della proposta
-    const analisiApprofondita = await generaAnalisiAI(lead, fatturato);
-    const html = generaHTML(lead, prodotti, fatturato, consulente || 'Consulente Pagine SÃ¬!', analisiApprofondita);
+    // Analisi deterministica + competitor reali da Google Maps
+    const analisiApprofondita = generaAnalisiDati(lead, fatturato);
+    const competitor = await cercaCompetitorReali(lead);
+    analisiApprofondita.competitor = competitor;
+
+    const html = generaHTML(lead, prodotti, fatturato, consulente || 'Consulente Pagine Si!', analisiApprofondita);
     res.json({ html, prodotti, fatturato });
   } catch(err) {
     res.status(500).json({ error: err.message });
