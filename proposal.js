@@ -216,139 +216,139 @@ function costruisciPreventivo(lead, fatturato, analisi) {
 }
 
 // â”€â”€ NUOVA FUNZIONE: genera HTML sezione analisi prevendita â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function buildAnalisiProposta(analisiData) {
-  if (!analisiData) return '';
-  const a = analisiData;
+function buildAnalisiProposta(a) {
+  if (!a) return '';
 
-  const socialCls = a.social_livello === 'GESTITO' ? 'background:#e8f5e9;color:#2e7d32' : a.social_livello === 'BASE' ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
-  const posCls = a.pos_livello === 'ALTO' ? 'background:#e8f5e9;color:#2e7d32' : a.pos_livello === 'MEDIO' ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
-  const sb = a.scenario_before || { sito: 5, social: 5, google: 10 };
-  const sa = a.scenario_after  || { sito: 82, social: 76, google: 84 };
+  var socialCls = a.social_livello === 'GESTITO' ? 'background:#e8f5e9;color:#2e7d32' : a.social_livello === 'BASE' ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
+  var posCls    = a.pos_livello === 'ALTO' ? 'background:#e8f5e9;color:#2e7d32' : a.pos_livello === 'MEDIO' ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
+  var sb = a.scenario_before || { sito: 5, social: 5, google: 10 };
+  var sa = a.scenario_after  || { sito: 82, social: 76, google: 84 };
 
-  const barRow = (label, before, after) => `
-    <tr>
-      <td style="padding:6px 12px;font-size:10pt;color:rgba(255,255,255,0.6);width:130px;">${label}</td>
-      <td style="padding:6px 12px;">
-        <div style="display:flex;flex-direction:column;gap:4px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:8pt;color:rgba(255,255,255,0.35);width:34px;">Ora</span>
-            <div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:99px;">
-              <div style="height:6px;width:${before}%;background:#E8001C;border-radius:99px;"></div>
-            </div>
-            <span style="font-size:9pt;color:#E8001C;font-weight:700;width:36px;text-align:right;">${before}%</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:8pt;color:rgba(255,255,255,0.35);width:34px;">Dopo</span>
-            <div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:99px;">
-              <div style="height:6px;width:${after}%;background:#4caf50;border-radius:99px;"></div>
-            </div>
-            <span style="font-size:9pt;color:#4caf50;font-weight:700;width:36px;text-align:right;">+${after}%</span>
-          </div>
-        </div>
-      </td>
-    </tr>`;
+  function barRow(label, before, after) {
+    return '<tr>' +
+      '<td style="padding:6px 12px;font-size:10pt;color:rgba(255,255,255,0.6);width:130px;">' + label + '</td>' +
+      '<td style="padding:6px 12px;">' +
+        '<div style="display:flex;flex-direction:column;gap:4px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;">' +
+            '<span style="font-size:8pt;color:rgba(255,255,255,0.35);width:34px;">Ora</span>' +
+            '<div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:99px;">' +
+              '<div style="height:6px;width:' + before + '%;background:#E8001C;border-radius:99px;"></div>' +
+            '</div>' +
+            '<span style="font-size:9pt;color:#E8001C;font-weight:700;width:36px;text-align:right;">' + before + '%</span>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;">' +
+            '<span style="font-size:8pt;color:rgba(255,255,255,0.35);width:34px;">Dopo</span>' +
+            '<div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:99px;">' +
+              '<div style="height:6px;width:' + after + '%;background:#4caf50;border-radius:99px;"></div>' +
+            '</div>' +
+            '<span style="font-size:9pt;color:#4caf50;font-weight:700;width:36px;text-align:right;">+' + after + '%</span>' +
+          '</div>' +
+        '</div>' +
+      '</td>' +
+    '</tr>';
+  }
 
   // Competitor
-  let competitorHTML = '';
+  var competitorHTML = '';
   if (a.competitor && a.competitor.length) {
-    const cells = a.competitor.map((c, idx) => {
-      const cPosCls = idx === 0 ? 'background:#e8f5e9;color:#2e7d32' : idx === 1 ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
-      const cSocCls = c.social === 'GESTITO' ? 'background:#e8f5e9;color:#2e7d32' : c.social === 'BASE' ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
+    var cells = a.competitor.map(function(c, idx) {
+      var cPosCls = idx === 0 ? 'background:#e8f5e9;color:#2e7d32' : idx === 1 ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
+      var cSocCls = c.social === 'GESTITO' ? 'background:#e8f5e9;color:#2e7d32' : c.social === 'BASE' ? 'background:#fff8e1;color:#f57f17' : 'background:#fce8e8;color:#b71c1c';
       return '<td style="padding:10px;border:1px solid #eee;border-radius:8px;vertical-align:top;width:33%;">' +
         '<div style="font-size:10.5pt;font-weight:700;color:#1a1a1a;margin-bottom:8px;">' + c.nome + '</div>' +
-        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Posiz. ricerca: <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-weight:700;font-size:8pt;' + cPosCls + '">#' + c.pos_google + ' risultato</span></div>' +
-        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Rating: <strong>' + (c.rating || 'N/D') + '</strong> (' + c.n_recensioni + ' rec.)</div>' +
-        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Sito web: <strong>' + (c.ha_sito ? 'Si' : 'No') + '</strong></div>' +
-        '<div style="margin-bottom:6px;font-size:9pt;color:#777;">Social: <span style="display:inline-block;padding:1px 7px;border-radius:10px;font-weight:700;font-size:8pt;' + cSocCls + '">' + c.social + '</span></div>' +
-        '<div style="font-size:8.5pt;color:#aaa;font-style:italic;">Punto forza: ' + (c.punto_forza || '') + '</div>' +
+        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Pos. ricerca: <span style="padding:1px 7px;border-radius:10px;font-weight:700;font-size:8pt;' + cPosCls + '">#' + c.pos_google + '</span></div>' +
+        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Rating: <strong>' + (c.rating || 'N/D') + '</strong> (' + (c.n_recensioni || 0) + ' rec.)</div>' +
+        '<div style="margin-bottom:4px;font-size:9pt;color:#777;">Sito: <strong>' + (c.ha_sito ? 'Si' : 'No') + '</strong></div>' +
+        '<div style="margin-bottom:6px;font-size:9pt;color:#777;">Social: <span style="padding:1px 7px;border-radius:10px;font-weight:700;font-size:8pt;' + cSocCls + '">' + c.social + '</span></div>' +
+        '<div style="font-size:8.5pt;color:#aaa;font-style:italic;">' + (c.punto_forza || '') + '</div>' +
         '</td>';
     }).join('<td style="width:8px;"></td>');
-    competitorHTML = '<div style="margin-bottom:20px;">' +
-      '<div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">Competitor di Zona (dati Google Maps reali)</div>' +
-      '<table style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>' + cells + '</tr></table>' +
+    competitorHTML =
+      '<div style="margin-bottom:20px;">' +
+        '<div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">Competitor di Zona â€” dati Google Maps reali</div>' +
+        '<table style="width:100%;border-collapse:separate;border-spacing:8px;"><tr>' + cells + '</tr></table>' +
       '</div>';
   }
 
-  // OpportunitÃ 
-  const oppsHTML = (a.opportunita || []).map(o =>
-    `<div style="display:flex;gap:8px;background:#fff8e1;border:1px solid #ffe082;border-radius:7px;padding:8px 12px;margin-bottom:6px;font-size:10pt;color:#6d4c00;line-height:1.5;"><span>ðŸ’¡</span><span>${o}</span></div>`
-  ).join('');
+  // Opportunita
+  var oppsHTML = '';
+  if (a.opportunita && a.opportunita.length) {
+    oppsHTML = a.opportunita.map(function(o) {
+      return '<div style="display:flex;gap:8px;background:#fff8e1;border:1px solid #ffe082;border-radius:7px;padding:8px 12px;margin-bottom:6px;font-size:10pt;color:#6d4c00;line-height:1.5;">' + o + '</div>';
+    }).join('');
+  }
 
   // Link social
-  const socialLinksHTML = (a.social_link_fb || a.social_link_ig) ? `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-      ${a.social_link_fb ? `<a href="${a.social_link_fb}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#1877f2;color:white;border-radius:20px;font-size:9.5pt;font-weight:600;text-decoration:none;">ðŸ“˜ Facebook</a>` : ''}
-      ${a.social_link_ig ? `<a href="${a.social_link_ig}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);color:white;border-radius:20px;font-size:9.5pt;font-weight:600;text-decoration:none;">ðŸ“· Instagram</a>` : ''}
-    </div>` : '';
+  var socialLinksHTML = '';
+  if (a.social_link_fb || a.social_link_ig) {
+    socialLinksHTML = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">';
+    if (a.social_link_fb) {
+      socialLinksHTML += '<a href="' + a.social_link_fb + '" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#1877f2;color:white;border-radius:20px;font-size:9.5pt;font-weight:600;text-decoration:none;">Facebook</a>';
+    }
+    if (a.social_link_ig) {
+      socialLinksHTML += '<a href="' + a.social_link_ig + '" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#e1306c;color:white;border-radius:20px;font-size:9.5pt;font-weight:600;text-decoration:none;">Instagram</a>';
+    }
+    socialLinksHTML += '</div>';
+  }
 
-  return `
-  <!-- SEZIONE ANALISI PREVENDITA -->
-  <div style="margin-bottom:28px;border:1.5px solid #e8e8e8;border-left:5px solid #E8001C;border-radius:10px;overflow:hidden;">
+  var html = '<div style="margin-bottom:28px;border:1.5px solid #e8e8e8;border-left:5px solid #E8001C;border-radius:10px;overflow:hidden;">';
 
-    <div style="background:#f9f9f9;padding:14px 22px;border-bottom:1px solid #eee;">
-      <div style="font-size:10.5pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;">ðŸ“Š Analisi Digitale Prevendita</div>
-      <div style="font-size:9pt;color:#aaa;margin-top:2px;">Lead Agent Â· Generata automaticamente al momento della proposta</div>
-    </div>
+  // Header
+  html += '<div style="background:#f9f9f9;padding:14px 22px;border-bottom:1px solid #eee;">';
+  html += '<div style="font-size:10.5pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;">Analisi Digitale Prevendita</div>';
+  html += '<div style="font-size:9pt;color:#aaa;margin-top:2px;">Lead Agent - Generata automaticamente</div>';
+  html += '</div>';
 
-    <div style="padding:20px 22px;">
+  html += '<div style="padding:20px 22px;">';
 
-      <!-- Posizionamento Google -->
-      <div style="margin-bottom:20px;">
-        <div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">
-          Posizionamento Google
-        </div>
-        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-          <div style="text-align:center;background:#f9f9f9;border:1px solid #eee;border-radius:10px;padding:16px 24px;">
-            <div style="font-size:2.8rem;font-weight:800;color:#E8001C;line-height:1;">#${a.pos_stimata || '?'}</div>
-            <div style="font-size:8.5pt;color:#aaa;margin-top:4px;text-transform:uppercase;letter-spacing:0.06em;">Posizione stimata</div>
-          </div>
-          <div style="flex:1;min-width:200px;">
-            <div style="margin-bottom:6px;">
-              <span style="display:inline-block;padding:3px 12px;border-radius:12px;font-weight:700;font-size:10pt;${posCls}">${a.pos_livello || 'â€”'}</span>
-            </div>
-            <div style="font-size:9.5pt;color:#555;line-height:1.5;">Keyword: <strong>"${a.pos_keyword || ''}"</strong></div>
-            <div style="font-size:9pt;color:#888;margin-top:4px;line-height:1.5;">Range: ${a.pos_range || 'â€”'} Â· ${a.pos_commento || ''}</div>
-          </div>
-        </div>
-      </div>
+  // Posizionamento Google
+  html += '<div style="margin-bottom:20px;">';
+  html += '<div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">Posizionamento Google</div>';
+  html += '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">';
+  html += '<div style="text-align:center;background:#f9f9f9;border:1px solid #eee;border-radius:10px;padding:16px 24px;">';
+  html += '<div style="font-size:2.8rem;font-weight:800;color:#E8001C;line-height:1;">#' + (a.pos_stimata || '?') + '</div>';
+  html += '<div style="font-size:8.5pt;color:#aaa;margin-top:4px;text-transform:uppercase;letter-spacing:0.06em;">Posizione stimata</div>';
+  html += '</div>';
+  html += '<div style="flex:1;min-width:200px;">';
+  html += '<div style="margin-bottom:6px;"><span style="display:inline-block;padding:3px 12px;border-radius:12px;font-weight:700;font-size:10pt;' + posCls + '">' + (a.pos_livello || '') + '</span></div>';
+  html += '<div style="font-size:9.5pt;color:#555;line-height:1.5;">Keyword: <strong>' + (a.pos_keyword || '') + '</strong></div>';
+  html += '<div style="font-size:9pt;color:#888;margin-top:4px;line-height:1.5;">Range: ' + (a.pos_range || '') + ' - ' + (a.pos_commento || '') + '</div>';
+  html += '</div></div></div>';
 
-      <!-- Social Media -->
-      <div style="margin-bottom:20px;">
-        <div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">
-          Presenza Social Media
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-          <span style="display:inline-block;padding:4px 14px;border-radius:20px;font-size:11pt;font-weight:700;${socialCls}">${a.social_livello || 'â€”'}</span>
-          <span style="font-size:9.5pt;color:#555;">${a.social_commento || ''}</span>
-        </div>
-        ${socialLinksHTML}
-      </div>
+  // Social
+  html += '<div style="margin-bottom:20px;">';
+  html += '<div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">Presenza Social Media</div>';
+  html += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">';
+  html += '<span style="display:inline-block;padding:4px 14px;border-radius:20px;font-size:11pt;font-weight:700;' + socialCls + '">' + (a.social_livello || '') + '</span>';
+  html += '<span style="font-size:9.5pt;color:#555;">' + (a.social_commento || '') + '</span>';
+  html += '</div>';
+  html += socialLinksHTML;
+  html += '</div>';
 
-      ${competitorHTML}
+  // Competitor
+  html += competitorHTML;
 
-      <!-- Scenario -->
-      <div style="margin-bottom:20px;">
-        <div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">
-          Scenario di Crescita Atteso
-        </div>
-        <div style="background:#111;border-radius:8px;padding:18px;overflow:hidden;">
-          <div style="font-size:9.5pt;font-weight:700;color:white;margin-bottom:14px;opacity:0.8;">Situazione Attuale vs Con i Servizi Proposti</div>
-          <table style="width:100%;border-collapse:collapse;">
-            ${barRow('VisibilitÃ  sito', sb.sito || 5, sa.sito || 82)}
-            ${barRow('Presenza social', sb.social || 5, sa.social || 76)}
-            ${barRow('Posiz. Google', sb.google || 10, sa.google || 84)}
-          </table>
-        </div>
-      </div>
+  // Scenario
+  html += '<div style="margin-bottom:20px;">';
+  html += '<div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">Scenario di Crescita Atteso</div>';
+  html += '<div style="background:#111;border-radius:8px;padding:18px;overflow:hidden;">';
+  html += '<div style="font-size:9.5pt;font-weight:700;color:white;margin-bottom:14px;opacity:0.8;">Situazione Attuale vs Con i Servizi Proposti</div>';
+  html += '<table style="width:100%;border-collapse:collapse;">';
+  html += barRow('Visibilita sito', sb.sito || 5, sa.sito || 82);
+  html += barRow('Presenza social', sb.social || 5, sa.social || 76);
+  html += barRow('Posiz. Google', sb.google || 10, sa.google || 84);
+  html += '</table></div></div>';
 
-      ${oppsHTML ? `
-      <div>
-        <div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">OpportunitÃ  Identificate</div>
-        ${oppsHTML}
-      </div>` : ''}
+  // Opportunita
+  if (oppsHTML) {
+    html += '<div>';
+    html += '<div style="font-size:10pt;font-weight:700;color:#E8001C;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #E8001C;">Opportunita Identificate</div>';
+    html += oppsHTML;
+    html += '</div>';
+  }
 
-    </div>
-  </div>`;
+  html += '</div></div>';
+  return html;
 }
 
 // Genera HTML proposta â€” IDENTICO ALL'ORIGINALE + sezione analisi opzionale
