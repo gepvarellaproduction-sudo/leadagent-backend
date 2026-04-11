@@ -203,7 +203,7 @@ function costruisciPreventivo(lead, fatturato, analisi) {
   return prodottiScelti;
 }
 
-// â”€â”€ DataForSEO: posizione reale + competitor dalla SERP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// DataForSEO: posizione reale + competitor dalla SERP
 async function analisiSEOReale(lead) {
   const DATAFORSEO_LOGIN = process.env.DATAFORSEO_LOGIN;
   const DATAFORSEO_PASSWORD = process.env.DATAFORSEO_PASSWORD;
@@ -280,7 +280,7 @@ async function analisiSEOReale(lead) {
   }
 }
 
-// â”€â”€ Competitor da Google Maps (fallback o dati aggiuntivi) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Competitor da Google Maps (fallback)
 async function cercaCompetitorMaps(lead) {
   const GOOGLE_KEY = process.env.GOOGLE_API_KEY;
   const categoria = lead.categoria || '';
@@ -325,7 +325,7 @@ async function cercaCompetitorMaps(lead) {
   }
 }
 
-// â”€â”€ Genera HTML sezione analisi â€” solo string concatenation, zero template literals â”€â”€
+// Genera HTML sezione analisi - solo string concatenation
 function buildAnalisiHTML(seo, mapsCompetitor, lead) {
   var hasSito = !!(lead.web && lead.web !== 'N/D');
   var nRating = lead.nRating || 0;
@@ -488,7 +488,7 @@ function buildAnalisiHTML(seo, mapsCompetitor, lead) {
   return h;
 }
 
-// â”€â”€ ORIGINALE invariato: genera HTML proposta completa â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ORIGINALE invariato: genera HTML proposta completa
 function generaHTML(lead, prodotti, fatturato, consulente) {
   const oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
   const scadenza = new Date(Date.now() + 30*24*60*60*1000).toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
@@ -724,10 +724,10 @@ tr.removable:hover td:first-child::before{opacity:0.3;cursor:pointer}
   <div class="pitch">
     <h3>&#127919; Note per il consulente</h3>
     <p contenteditable="true">
-      ${!lead.web || lead.web === 'N/D' ? `<strong>${lead.nome}</strong> non ha presenza web &mdash; punto di ingresso ideale con il sito come anchor del pacchetto.` : `<strong>${lead.nome}</strong> ha giÃ  un sito ma presenta margini di crescita su social, reputazione e visibilitÃ  locale.`}
-      ${lead.rating && lead.rating < 3.5 ? ` Rating ${lead.rating}/5: proponi Instatrust come prioritÃ  assoluta per invertire la tendenza.` : ''}
-      ${(lead.nRating || 0) < 10 ? ` Con solo ${lead.nRating || 0} recensioni Ã¨ praticamente invisibile su Google Maps &mdash; la scheda GBP Ã¨ l'argomento piÃ¹ forte.` : ''}
-      Il budget proposto di &euro;${fatturato.budgetMensileMax}/mese Ã¨ sostenibile per un'attivitÃ  del settore ${fatturato.label} nella zona di riferimento.
+      ${!lead.web || lead.web === 'N/D' ? '<strong>'+lead.nome+'</strong> non ha presenza web &mdash; punto di ingresso ideale con il sito come anchor del pacchetto.' : '<strong>'+lead.nome+'</strong> ha gia un sito ma presenta margini di crescita su social, reputazione e visibilita locale.'}
+      ${lead.rating && lead.rating < 3.5 ? ' Rating '+lead.rating+'/5: proponi Instatrust come priorita assoluta per invertire la tendenza.' : ''}
+      ${(lead.nRating || 0) < 10 ? ' Con solo '+(lead.nRating||0)+' recensioni e praticamente invisibile su Google Maps &mdash; la scheda GBP e l\'argomento piu forte.' : ''}
+      Il budget proposto di &euro;${fatturato.budgetMensileMax}/mese e sostenibile per il settore ${fatturato.label} nella zona di riferimento.
     </p>
   </div>
 
@@ -895,7 +895,7 @@ function esportaPDF() {
 </html>`;
 }
 
-// â”€â”€ Endpoint principale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Endpoint principale
 router.post('/', async (req, res) => {
   try {
     const { lead, consulente, sigleExtra } = req.body;
