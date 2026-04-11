@@ -108,17 +108,18 @@ async function cercaSocial(nome, citta) {
 // Posizione Google organica del lead
 async function cercaPosizioneGoogle(nome, web, categoria, citta) {
   var keyword = categoria + ' ' + citta;
+  // Domini directory da escludere sempre
+  var directory = ['paginegialle','paginebianche','tripadvisor','virgilio','yelp','google','facebook','instagram','tiktok','linkedin','twitter','youtube','wikipedia','comune.','regione.','gov.it','informagiovani','tuttitalia','italiaoggi','corriere','repubblica','sole24ore','lastampa'];
   try {
     var items = await dfsSearch(keyword, 100);
-    var nomeNorm = (nome||'').toLowerCase();
     var webNorm = web ? web.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
+    // Cerca SOLO per dominio del sito - mai per titolo (troppo impreciso)
+    if (!webNorm) return { posizione: null, url: null, keyword: keyword, non_trovato: true, items: items, no_sito: true };
     for (var i = 0; i < items.length; i++) {
       var dom = (items[i].domain||'').toLowerCase();
-      var tit = (items[i].title||'').toLowerCase();
-      if (webNorm && dom.includes(webNorm)) return { posizione: i+1, url: items[i].url, keyword: keyword, items: items };
-      if (nomeNorm.split(' ')[0] && tit.includes(nomeNorm.split(' ')[0]) && tit.includes(citta.toLowerCase())) {
-        return { posizione: i+1, url: items[i].url, keyword: keyword, items: items };
-      }
+      // Salta le directory
+      if (directory.some(function(d){ return dom.includes(d); })) continue;
+      if (dom.includes(webNorm)) return { posizione: i+1, url: items[i].url, keyword: keyword, items: items };
     }
     return { posizione: null, url: null, keyword: keyword, non_trovato: true, items: items };
   } catch(e) { return null; }
@@ -126,7 +127,8 @@ async function cercaPosizioneGoogle(nome, web, categoria, citta) {
 
 // Competitor da Google Maps con posizione SERP
 async function cercaCompetitor(categoria, citta, nomeLeadNorm, webLeadNorm, serpItems) {
-  var competitor = [];
+  var directory = ['paginegialle','paginebianche','tripadvisor','virgilio','yelp','google','facebook','instagram','tiktok','linkedin','twitter','youtube','wikipedia'];
+  var risultato = { posizione_maps_lead: null, competitor: [] };
   try {
     var resp = await fetch('https://places.googleapis.com/v1/places:searchText', {
       method: 'POST',
@@ -135,26 +137,37 @@ async function cercaCompetitor(categoria, citta, nomeLeadNorm, webLeadNorm, serp
         'X-Goog-Api-Key': GOOGLE_KEY,
         'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.nationalPhoneNumber,places.id'
       },
-      body: JSON.stringify({ textQuery: categoria + ' ' + citta, languageCode: 'it', maxResultCount: 10 })
+      body: JSON.stringify({ textQuery: categoria + ' ' + citta, languageCode: 'it', maxResultCount: 15 })
     });
     var data = await resp.json();
-    if (!data.places) return [];
+    if (!data.places) return risultato;
 
-    competitor = data.places
+    // Trova posizione Maps del lead
+    for (var i = 0; i < data.places.length; i++) {
+      var n = ((data.places[i].displayName && data.places[i].displayName.text)||'').toLowerCase().trim();
+      if (n.includes(nomeLeadNorm.slice(0,5)) || (webLeadNorm && (data.places[i].websiteUri||'').toLowerCase().includes(webLeadNorm))) {
+        risultato.posizione_maps_lead = i + 1;
+        break;
+      }
+    }
+
+    // Competitor: escludi il lead
+    risultato.competitor = data.places
       .filter(function(p) {
         var n = ((p.displayName && p.displayName.text)||'').toLowerCase().trim();
-        return n && n !== nomeLeadNorm && !n.includes(nomeLeadNorm.slice(0,5));
+        return n && !n.includes(nomeLeadNorm.slice(0,5)) && !(webLeadNorm && (p.websiteUri||'').toLowerCase().includes(webLeadNorm));
       })
       .slice(0, 3)
       .map(function(p, idx) {
         var sito = p.websiteUri || null;
         var sitoDom = sito ? sito.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
 
-        // Cerca posizione SERP del competitor
+        // Posizione SERP competitor - solo se non e una directory
         var posizioneSerp = null;
-        if (sitoDom && serpItems && serpItems.length) {
+        if (sitoDom && serpItems && serpItems.length && !directory.some(function(d){ return sitoDom.includes(d); })) {
           for (var i = 0; i < serpItems.length; i++) {
-            if ((serpItems[i].domain||'').toLowerCase().includes(sitoDom)) {
+            var serpDom = (serpItems[i].domain||'').toLowerCase();
+            if (!directory.some(function(d){ return serpDom.includes(d); }) && serpDom.includes(sitoDom)) {
               posizioneSerp = i + 1;
               break;
             }
@@ -173,7 +186,7 @@ async function cercaCompetitor(categoria, citta, nomeLeadNorm, webLeadNorm, serp
         };
       });
   } catch(e) {}
-  return competitor;
+  return risultato;
 }
 
 // Endpoint analisi completa
@@ -202,7 +215,9 @@ app.post('/analisi', async function(req, res) {
     var serpItems = (seo && seo.items) || [];
 
     // Competitor con SERP
-    var competitor = await cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems);
+    var mapsData = await cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems);
+    var competitor = mapsData.competitor;
+    var posizioneMapLead = mapsData.posizione_maps_lead;
 
     // Keyword gap: domini competitor che appaiono in SERP ma il lead no
     var keywordGap = [];
@@ -219,32 +234,33 @@ app.post('/analisi', async function(req, res) {
     var boxStyle = 'background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:16px 18px;margin-bottom:24px';
     var body = '';
 
-    // 1. Posizionamento Google
+    // 1. Posizionamento Google + Maps
+    var keyword = (seo && seo.keyword) || (categoria + ' ' + citta);
     body += '<div style="margin-bottom:28px">';
-    body += '<div style="' + secStyle + '">Posizionamento Google Organico</div>';
-    if (seo && seo.posizione) {
-      var posColor = seo.posizione <= 10 ? '#2e7d32' : seo.posizione <= 30 ? '#e65100' : '#c62828';
-      var posLabel = seo.posizione <= 10 ? 'Prima pagina' : seo.posizione <= 30 ? 'Pagine 2-3' : 'Oltre pagina 3';
-      var posDesc = seo.posizione <= 10 ? 'Ottima visibilita organica' : seo.posizione <= 30 ? 'Visibilita migliorabile con SEO' : 'Scarsa visibilita - intervento SEO necessario';
-      body += '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;' + boxStyle + '">';
-      body += '<div style="text-align:center;min-width:100px"><div style="font-size:3.2rem;font-weight:800;color:' + posColor + ';line-height:1">#' + seo.posizione + '</div>';
-      body += '<div style="font-size:8pt;color:#aaa;margin-top:6px;text-transform:uppercase;letter-spacing:0.05em">Posizione su Google</div></div>';
-      body += '<div style="flex:1;min-width:200px">';
-      body += '<div style="font-size:11pt;font-weight:700;color:' + posColor + ';margin-bottom:6px">' + posLabel + '</div>';
-      body += '<div style="font-size:9.5pt;color:#555;margin-bottom:4px">Keyword: <strong>' + seo.keyword + '</strong></div>';
-      body += '<div style="font-size:9pt;color:#888;margin-bottom:8px">' + posDesc + '</div>';
-      if (seo.url) body += '<div style="font-size:8.5pt"><a href="' + seo.url + '" target="_blank" style="color:#1565c0;word-break:break-all">' + seo.url + '</a></div>';
-      body += '</div></div>';
-    } else if (seo && seo.non_trovato) {
-      body += '<div style="' + boxStyle + ';border-left:4px solid #c62828">';
-      body += '<div style="font-size:1.6rem;font-weight:800;color:#c62828;margin-bottom:8px">Non trovato nei primi 100 risultati</div>';
-      body += '<div style="font-size:9.5pt;color:#555">Nessuna presenza organica rilevata per <strong>' + seo.keyword + '</strong></div>';
-      body += '<div style="font-size:9pt;color:#888;margin-top:6px">L\'attivita non e indicizzata per questa keyword - opportunita SEO alta</div>';
-      body += '</div>';
-    } else {
-      body += '<div style="' + boxStyle + '"><div style="color:#aaa;font-size:9.5pt">Analisi non disponibile - verifica categoria e citta</div></div>';
-    }
+    body += '<div style="' + secStyle + '">Posizionamento - Keyword: ' + keyword + '</div>';
+    body += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">';
+    // Box Google
+    var gPos = seo && seo.posizione;
+    var gColor = gPos ? (gPos <= 10 ? '#2e7d32' : gPos <= 30 ? '#e65100' : '#c62828') : '#c62828';
+    var gLabel = gPos ? '#' + gPos : (seo && seo.no_sito ? 'Nessun sito' : 'Non trovato');
+    var gDesc = gPos ? (gPos <= 10 ? 'Prima pagina Google' : gPos <= 30 ? 'Pagine 2-3 Google' : 'Oltre pag. 3') : (seo && seo.no_sito ? 'Senza sito non tracciabile' : 'Assente dai primi 100');
+    body += '<div style="flex:1;min-width:140px;' + boxStyle + ';text-align:center;margin-bottom:0">';
+    body += '<div style="font-size:8.5pt;color:#777;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Google Organico</div>';
+    body += '<div style="font-size:2.6rem;font-weight:800;color:' + gColor + ';line-height:1">' + gLabel + '</div>';
+    body += '<div style="font-size:8.5pt;color:' + gColor + ';font-weight:600;margin-top:6px">' + gDesc + '</div>';
+    if (seo && seo.url) body += '<div style="margin-top:6px;font-size:8pt"><a href="' + seo.url + '" target="_blank" style="color:#1565c0">' + seo.url.replace(/^https?:\/\/(www\.)?/,'').slice(0,40) + '</a></div>';
     body += '</div>';
+    // Box Maps
+    var mPos = posizioneMapLead;
+    var mColor = mPos ? (mPos <= 3 ? '#2e7d32' : mPos <= 7 ? '#e65100' : '#c62828') : '#9e9e9e';
+    var mLabel = mPos ? '#' + mPos : 'N/T';
+    var mDesc = mPos ? (mPos <= 3 ? 'Top 3 su Maps' : mPos <= 7 ? 'Buona posizione Maps' : 'Bassa visibilita Maps') : 'Non in lista Maps';
+    body += '<div style="flex:1;min-width:140px;' + boxStyle + ';text-align:center;margin-bottom:0">';
+    body += '<div style="font-size:8.5pt;color:#777;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Google Maps</div>';
+    body += '<div style="font-size:2.6rem;font-weight:800;color:' + mColor + ';line-height:1">' + mLabel + '</div>';
+    body += '<div style="font-size:8.5pt;color:' + mColor + ';font-weight:600;margin-top:6px">' + mDesc + '</div>';
+    body += '</div>';
+    body += '</div></div>';
 
     // 2. Presenza digitale del lead
     body += '<div style="margin-bottom:28px">';
