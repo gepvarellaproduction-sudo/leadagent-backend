@@ -96,33 +96,47 @@ async function cercaPosizioneGoogle(nome, web, categoria, citta) {
   } catch(e) { return { posizione: null, keyword: keyword, items: [] }; }
 }
 
+function estraiFollower(snippet, title) {
+  var testo = (snippet||'') + ' ' + (title||'');
+  var m = testo.match(/(\d+[.,]?\d*\s*[KkMm]?)\s*(follower|followers|seguaci|Mi piace)/i);
+  return m ? m[0].trim() : null;
+}
+
+function trovaSocial(items, tipo) {
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var url = (item.url || '').toLowerCase();
+    var dom = (item.domain || '').toLowerCase();
+    if (!dom.includes(tipo + '.com')) continue;
+    var path = url.replace(new RegExp('https?://(www\\.)?' + tipo + '\\.com/?'), '');
+    var skip = tipo === 'facebook' ? ['search','watch','groups','login','pages/search','sharer'] : ['explore','p/','reel/','accounts'];
+    if (!path || path.length < 3 || skip.some(function(s){ return path.startsWith(s); })) continue;
+    return { url: item.url, follower: estraiFollower(item.description||'', item.title||'') };
+  }
+  return null;
+}
+
 async function cercaSocial(nome, citta) {
   var out = { facebook: null, facebook_follower: null, instagram: null, instagram_follower: null };
   try {
-    var items = await dfsSearch('"' + nome + '" ' + citta + ' facebook OR instagram', 10);
-    items.forEach(function(item) {
-      var url = (item.url || '').toLowerCase();
-      var dom = (item.domain || '').toLowerCase();
-      var snippet = item.description || '';
-      var title = item.title || '';
-      var follower = (function(){
-        var testo = snippet + ' ' + title;
-        var m = testo.match(/(\d+[.,]?\d*\s*[KkMm]?)\s*(follower|followers|seguaci|Mi piace)/i);
-        return m ? m[0].trim() : null;
-      })();
-      if (!out.facebook && dom.includes('facebook.com')) {
-        var p = url.replace(/https?:\/\/(www\.)?facebook\.com\/?/, '');
-        if (p && p.length > 2 && !p.startsWith('search') && !p.startsWith('watch') && !p.startsWith('groups')) {
-          out.facebook = item.url; out.facebook_follower = follower;
-        }
-      }
-      if (!out.instagram && dom.includes('instagram.com')) {
-        var p2 = url.replace(/https?:\/\/(www\.)?instagram\.com\/?/, '');
-        if (p2 && p2.length > 2 && !p2.startsWith('explore') && !p2.startsWith('p/')) {
-          out.instagram = item.url; out.instagram_follower = follower;
-        }
-      }
-    });
+    // Ricerca combinata
+    var items1 = await dfsSearch('"' + nome + '" ' + citta + ' facebook OR instagram', 10);
+    // Ricerca specifica Instagram se non trovato
+    var items2 = await dfsSearch(nome + ' instagram ' + citta, 5);
+    var allItems = items1.concat(items2);
+
+    var fb = trovaSocial(allItems, 'facebook');
+    if (fb) { out.facebook = fb.url; out.facebook_follower = fb.follower; }
+
+    var ig = trovaSocial(allItems, 'instagram');
+    if (ig) { out.instagram = ig.url; out.instagram_follower = ig.follower; }
+
+    // Se Instagram ancora non trovato, cerca piu aggressivamente
+    if (!out.instagram) {
+      var items3 = await dfsSearch(nome + ' instagram', 5);
+      var ig2 = trovaSocial(items3, 'instagram');
+      if (ig2) { out.instagram = ig2.url; out.instagram_follower = ig2.follower; }
+    }
   } catch(e) {}
   return out;
 }
@@ -161,20 +175,8 @@ async function cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems) {
           if (!dir.some(function(d){ return sd.includes(d); }) && sd.includes(sitoDom)) { posizioneSerp = si+1; break; }
         }
       }
-      // Recensioni competitor via Google Places Details
-      var recComp = null;
-      if (cp.id) {
-        try {
-          var rr = await fetch('https://places.googleapis.com/v1/places/' + cp.id, {
-            headers: { 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'reviews,userRatingCount' }
-          });
-          var rd = await rr.json();
-          if (rd.reviews && rd.reviews.length) {
-            var risposte = rd.reviews.filter(function(r){ return !!(r.reviewReply && r.reviewReply.text); }).length;
-            recComp = { campione: rd.reviews.length, risposte: risposte, perc: Math.round((risposte/rd.reviews.length)*100) };
-          }
-        } catch(e) {}
-      }
+      // Recensioni competitor (Google Places, 5 rec, sincrono)
+      var recComp = await cercaRecensioniComp(cp.id);
       out.competitor.push({
         nome: (cp.displayName && cp.displayName.text) || 'N/D',
         posizione_maps: ci + 1,
@@ -191,32 +193,71 @@ async function cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems) {
   return out;
 }
 
-async function cercaRecensioni(placeId) {
+// Avvia task DataForSEO recensioni (async) - restituisce taskId subito
+async function avviaTaskRecensioni(placeId, nome) {
+  if (!placeId && !nome) return null;
+  try {
+    var payload = [{ depth: 50, sort_by: 'newest', location_code: 2380, language_code: 'it' }];
+    if (placeId) { payload[0].place_id = placeId; } else { payload[0].keyword = nome; }
+    var resp = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_post', {
+      method: 'POST',
+      headers: { 'Authorization': dfsAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    var data = await resp.json();
+    return (data.tasks && data.tasks[0] && data.tasks[0].id) || null;
+  } catch(e) { return null; }
+}
+
+// Raccogli risultati task recensioni
+async function raccogliRecensioni(taskId, totaleRecensioni) {
+  if (!taskId) return null;
+  try {
+    for (var i = 0; i < 10; i++) {
+      await new Promise(function(r){ setTimeout(r, 2000); });
+      var resp = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_get/' + taskId, {
+        headers: { 'Authorization': dfsAuth() }
+      });
+      var data = await resp.json();
+      var task = data.tasks && data.tasks[0];
+      if (task && task.status_code === 20000 && task.result && task.result[0]) {
+        var result = task.result[0];
+        var items = result.items || [];
+        var totale = totaleRecensioni || result.reviews_count || items.length;
+        var risposte = items.filter(function(r){ return !!r.owner_answer; }).length;
+        var campione = items.length;
+        var perc = campione > 0 ? Math.round((risposte/campione)*100) : 0;
+        var pos = items.filter(function(r){ return r.rating && r.rating.value >= 4; }).length;
+        var neg = items.filter(function(r){ return r.rating && r.rating.value <= 2; }).length;
+        var ultima = items[0];
+        return {
+          totale_recensioni: totale,
+          campione: campione,
+          con_risposta: risposte,
+          perc_risposta: perc,
+          positive: pos,
+          negative: neg,
+          testi: items.slice(0,20).map(function(r){ return { rating: r.rating&&r.rating.value, testo: r.review_text||'', ha_risposta: !!r.owner_answer, time_ago: r.time_ago||'' }; }),
+          ultima: ultima ? { rating: ultima.rating&&ultima.rating.value, testo: ultima.review_text||'', ha_risposta: !!ultima.owner_answer, time_ago: ultima.time_ago||'' } : null
+        };
+      }
+    }
+  } catch(e) {}
+  return null;
+}
+
+// Recensioni rapide per competitor (Google Places, 5 rec, sincrono)
+async function cercaRecensioniComp(placeId) {
   if (!placeId) return null;
   try {
     var resp = await fetch('https://places.googleapis.com/v1/places/' + placeId, {
-      headers: { 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'reviews,userRatingCount' }
+      headers: { 'X-Goog-Api-Key': GOOGLE_KEY, 'X-Goog-FieldMask': 'reviews' }
     });
     var data = await resp.json();
     if (!data.reviews || !data.reviews.length) return null;
     var reviews = data.reviews;
-    var totale = data.userRatingCount || reviews.length;
     var risposte = reviews.filter(function(r){ return !!(r.reviewReply && r.reviewReply.text); }).length;
-    var campione = reviews.length;
-    var perc = campione > 0 ? Math.round((risposte/campione)*100) : 0;
-    var pos = reviews.filter(function(r){ return r.rating >= 4; }).length;
-    var neg = reviews.filter(function(r){ return r.rating <= 2; }).length;
-    var ultima = reviews[0];
-    return {
-      totale_recensioni: totale,
-      campione: campione,
-      con_risposta: risposte,
-      perc_risposta: perc,
-      positive: pos,
-      negative: neg,
-      testi: reviews.map(function(r){ return { rating: r.rating, testo: (r.text && r.text.text) || '', ha_risposta: !!(r.reviewReply && r.reviewReply.text), time_ago: r.relativePublishTimeDescription || '' }; }),
-      ultima: ultima ? { rating: ultima.rating, testo: (ultima.text && ultima.text.text) || '', ha_risposta: !!(ultima.reviewReply && ultima.reviewReply.text), time_ago: ultima.relativePublishTimeDescription || '' } : null
-    };
+    return { campione: reviews.length, risposte: risposte, perc: Math.round((risposte/reviews.length)*100) };
   } catch(e) { return null; }
 }
 
@@ -315,18 +356,22 @@ app.post('/analisi', async function(req, res) {
     var nomeNorm = nome.toLowerCase().trim();
     var webNorm = web ? web.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
 
-    // Tutte le ricerche in parallelo
+    // Avvia task recensioni SUBITO (async, non blocca)
+    var recTaskId = await avviaTaskRecensioni(lead.placeId, nome);
+
+    // Tutte le altre ricerche in parallelo
     var risultati = await Promise.all([
       cercaPosizioneGoogle(nome, web, categoria, citta),
-      cercaSocial(nome, citta),
-      cercaRecensioni(lead.placeId)
+      cercaSocial(nome, citta)
     ]);
     var seo = risultati[0];
     var social = risultati[1];
-    var recensioni = risultati[2];
     var serpItems = (seo && seo.items) || [];
 
     var mapsData = await cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems);
+
+    // Ora raccoglie recensioni (il task e' stato avviato ~20s fa, probabilmente gia pronto)
+    var recensioni = await raccogliRecensioni(recTaskId, nRating);
     var competitor = mapsData.competitor;
     lead._mapsPos = mapsData.posizione_maps_lead;
 
