@@ -599,8 +599,16 @@ app.post('/analisi', async function(req, res) {
 
     // HTML pagina completa
     var oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+    var leadJson = JSON.stringify({
+      nome: nome, indirizzo: lead.indirizzo || '', web: web || null,
+      telefono: lead.telefono || null, tipi: lead.tipi || [],
+      rating: rating, nRating: nRating, descrizione: lead.descrizione || null,
+      fotoRefs: lead.fotoRefs || [], placeId: lead.placeId || null,
+      categoria: categoria, citta: citta
+    });
+
     var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
-      '<title>Analisi Digitale - ' + nome + '</title>' +
+      '<title>Analisi - ' + nome + '</title>' +
       '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}' +
       '.page{max-width:900px;margin:24px auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)}' +
       '.hdr{background:#111;padding:22px 30px;display:flex;justify-content:space-between;align-items:center}' +
@@ -610,8 +618,13 @@ app.post('/analisi', async function(req, res) {
       '.lead-bar .ln{font-size:13pt;font-weight:700;margin-bottom:4px}.lead-bar .ls{font-size:9pt;color:#777;display:flex;gap:16px;flex-wrap:wrap}' +
       '.body{padding:20px 30px 30px}' +
       '.no-print{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}' +
-      '.btn-print{padding:8px 18px;background:#E8001C;color:white;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer}' +
-      '.btn-close{padding:8px 18px;background:#f5f5f5;color:#555;border:1px solid #ddd;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer}' +
+      '.btn-a{padding:9px 20px;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;transition:opacity 0.2s}' +
+      '.btn-a:disabled{opacity:0.5;cursor:not-allowed}' +
+      '.btn-red{background:#E8001C;color:white}' +
+      '.btn-dark{background:#111;color:white}' +
+      '.btn-green{background:#2e7d32;color:white}' +
+      '.btn-gray{background:#f5f5f5;color:#555;border:1px solid #ddd}' +
+      '#proposta-wrap{margin-top:8px}' +
       '@media print{.no-print{display:none}body{background:white}.page{box-shadow:none;border-radius:0;margin:0}}' +
       '</style></head><body>' +
       '<div class="page">' +
@@ -626,12 +639,50 @@ app.post('/analisi', async function(req, res) {
       '</div></div>' +
       '<div class="body">' +
       '<div class="no-print">' +
-      '<button class="btn-print" onclick="window.print()">Stampa / Salva PDF</button>' +
-      '<button class="btn-close" onclick="window.close()">Chiudi</button>' +
+      '<button class="btn-a btn-red" onclick="window.print()">Stampa / Salva PDF</button>' +
+      '<button class="btn-a btn-dark" id="btn-proposta" onclick="generaProposta()">Genera Proposta Commerciale</button>' +
+      (web ? '<button class="btn-a btn-green" id="btn-anteprima" onclick="generaAnteprima()">Anteprima Sito</button>' : '') +
+      '<button class="btn-a btn-gray" onclick="window.close()">Chiudi</button>' +
       '</div>' +
       body +
       sezioneStrategia +
-      '</div></div></body></html>';
+      '<div id="proposta-wrap"></div>' +
+      '</div></div>' +
+      '<script>' +
+      'var BACKEND="https://leadagent-backend.onrender.com";' +
+      'var LEAD=' + leadJson + ';' +
+      'async function generaProposta(){' +
+      '  var btn=document.getElementById("btn-proposta");' +
+      '  btn.disabled=true;btn.textContent="Generazione in corso...";' +
+      '  try{' +
+      '    var consulente=prompt("Nome del consulente:","") || "Consulente Pagine Si!";' +
+      '    var r=await fetch(BACKEND+"/proposal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:LEAD,consulente:consulente})});' +
+      '    var d=await r.json();' +
+      '    if(d.error)throw new Error(d.error);' +
+      '    if(d.html){' +
+      '      var wrap=document.getElementById("proposta-wrap");' +
+      '      wrap.innerHTML="<hr style=\"border:none;border-top:3px solid #E8001C;margin:32px 0 24px\">";' +
+      '      var iframe=document.createElement("iframe");' +
+      '      iframe.style.cssText="width:100%;border:none;min-height:800px";' +
+      '      iframe.srcdoc=d.html;' +
+      '      wrap.appendChild(iframe);' +
+      '      wrap.scrollIntoView({behavior:"smooth"});' +
+      '      btn.textContent="Proposta generata";' +
+      '    }' +
+      '  }catch(e){alert("Errore: "+e.message);btn.disabled=false;btn.textContent="Genera Proposta Commerciale";}' +
+      '}' +
+      'async function generaAnteprima(){' +
+      '  var btn=document.getElementById("btn-anteprima");' +
+      '  if(btn){btn.disabled=true;btn.textContent="Generazione...";}' +
+      '  try{' +
+      '    var r=await fetch(BACKEND+"/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({nome:LEAD.nome,indirizzo:LEAD.indirizzo,telefono:LEAD.telefono,tipi:LEAD.tipi,rating:LEAD.rating,nRating:LEAD.nRating,descrizione:LEAD.descrizione})});' +
+      '    var d=await r.json();' +
+      '    if(d.html){var b=new Blob([d.html],{type:"text/html;charset=utf-8"});var u=URL.createObjectURL(b);window.open(u,"_blank");setTimeout(function(){URL.revokeObjectURL(u);},10000);}' +
+      '  }catch(e){alert("Errore anteprima: "+e.message);}' +
+      '  if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}' +
+      '}' +
+      '</script>' +
+      '</body></html>';
 
     res.json({ html: html });
   } catch(err) {
