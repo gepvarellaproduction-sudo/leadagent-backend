@@ -378,8 +378,8 @@ app.post('/analisi', async function(req, res) {
     // Visibilita AI
     var ai = calcolaVisibilitaAI(web, social, nRating, rating, seo, competitor);
 
-    // Analisi Claude
-    var strategia = await analisiClaude(lead, seo, social, recensioni, competitor);
+    // Analisi Claude: generata in background dalla pagina via /analisi-strategica
+    var strategia = null;
 
     //  Build HTML 
     var oggi = new Date().toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
@@ -565,32 +565,59 @@ app.post('/analisi', async function(req, res) {
       '</div></div>' +
       '<script>' +
       'var B="https://leadagent-backend.onrender.com";' +
+      'var AP=' + JSON.stringify(analisiPayloadJson) + ';' +
+      '(async function loadStrategia(){' +
+      '  try{' +
+      '    var r=await fetch(B+"/analisi-strategica",{method:"POST",headers:{"Content-Type":"application/json"},body:AP});' +
+      '    var d=await r.json();' +
+      '    var el=document.getElementById("strategia-loading");' +
+      '    if(el&&d.testo){el.style.textAlign="left";el.style.color="#1a1a1a";el.innerHTML="<p style=\"margin-bottom:10px\">"+d.testo+"</p>";}' +
+      '    else if(el){el.innerHTML="Analisi non disponibile.";}' +
+      '  }catch(e){var el=document.getElementById("strategia-loading");if(el)el.innerHTML="Analisi non disponibile.";}' +
+      '})();' +
       'var L='+leadJson+';' +
       'function toggleConsulente(){var p=document.getElementById("consulente-panel");p.style.display=p.style.display==="block"?"none":"block";if(p.style.display==="block")document.getElementById("consulente-input").focus();}' +
       'function generaProposta(){' +
       '  var c=document.getElementById("consulente-input").value.trim()||"Consulente Pagine Si!";' +
       '  document.getElementById("consulente-panel").style.display="none";' +
       '  var btn=document.getElementById("btn-prop");btn.disabled=true;btn.textContent="Generazione...";' +
-      '  var tab=window.open("","_blank");' +
-      '  if(tab){tab.document.write("<html><head><meta charset=\'UTF-8\'></head><body style=\'font-family:Arial,sans-serif;padding:3rem;text-align:center;color:#555\'><div style=\'font-size:2rem;margin-bottom:12px\'>&#8987;</div><div style=\'font-size:13pt;font-weight:600;color:#E8001C\'>Generazione proposta...</div></body></html>");}' +
       '  fetch(B+"/proposal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L,consulente:c})})' +
       '  .then(function(r){return r.json();})' +
-      '  .then(function(d){if(d.html&&tab&&!tab.closed){tab.document.open();tab.document.write(d.html);tab.document.close();}btn.disabled=false;btn.textContent="Proposta generata";})' +
-      '  .catch(function(e){console.error(e);if(tab&&!tab.closed)tab.close();btn.disabled=false;btn.textContent="Genera Proposta";});' +
+      '  .then(function(d){' +
+      '    if(d.html){var blob=new Blob([d.html],{type:"text/html;charset=utf-8"});var url=URL.createObjectURL(blob);window.open(url,"_blank");setTimeout(function(){URL.revokeObjectURL(url);},30000);}' +
+      '    btn.disabled=false;btn.textContent="Proposta generata";' +
+      '  })' +
+      '  .catch(function(e){console.error(e);btn.disabled=false;btn.textContent="Genera Proposta";});' +
       '}' +
       'function apriAnteprima(){' +
       '  var btn=document.getElementById("btn-ant");btn.disabled=true;btn.textContent="Generazione...";' +
-      '  var tab=window.open("","_blank");' +
-      '  if(tab){tab.document.write("<html><head><meta charset=\'UTF-8\'></head><body style=\'font-family:Arial,sans-serif;padding:3rem;text-align:center;color:#555\'><div style=\'font-size:2rem;margin-bottom:12px\'>&#8987;</div><div style=\'font-size:13pt;font-weight:600;color:#E8001C\'>Generazione anteprima sito...</div><div style=\'font-size:10pt;color:#aaa;margin-top:8px\'>(30-60 secondi)</div></body></html>");}' +
       '  fetch(B+"/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({nome:L.nome,indirizzo:L.indirizzo,telefono:L.telefono,tipi:L.tipi,rating:L.rating,nRating:L.nRating,descrizione:L.descrizione,logoUrl:L.logoUrl})})' +
       '  .then(function(r){return r.json();})' +
-      '  .then(function(d){if(d.html&&tab&&!tab.closed){tab.document.open();tab.document.write(d.html);tab.document.close();}btn.disabled=false;btn.textContent="Anteprima Sito";})' +
-      '  .catch(function(e){console.error(e);if(tab&&!tab.closed)tab.close();btn.disabled=false;btn.textContent="Anteprima Sito";});' +
+      '  .then(function(d){' +
+      '    if(d.html){var blob=new Blob([d.html],{type:"text/html;charset=utf-8"});var url=URL.createObjectURL(blob);window.open(url,"_blank");setTimeout(function(){URL.revokeObjectURL(url);},30000);}' +
+      '    btn.disabled=false;btn.textContent="Anteprima Sito";' +
+      '  })' +
+      '  .catch(function(e){console.error(e);btn.disabled=false;btn.textContent="Anteprima Sito";});' +
       '}' +
       '</script>' +
       '</body></html>';
 
     res.json({ html: html });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.post('/analisi-strategica', async function(req, res) {
+  try {
+    var lead = req.body.lead;
+    var seoData = req.body.seo || {};
+    var socialData = req.body.social || {};
+    var recData = req.body.recensioni || null;
+    var compData = req.body.competitor || [];
+    var testo = await analisiClaude(lead, seoData, socialData, recData, compData);
+    res.json({ testo: testo || '' });
   } catch(err) {
     res.status(500).json({ error: err.message });
   }
