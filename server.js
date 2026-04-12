@@ -992,3 +992,9 @@ app.post('/analisi-proposta', async function(req, res) {
   }
 });
 
+
+const { router: proposalRouter } = require('./proposal');
+app.use('/proposal', proposalRouter);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, function() { console.log('LeadAgent Backend running on port ' + PORT); });
