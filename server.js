@@ -290,16 +290,15 @@ app.post('/analisi', async function(req, res) {
     var nomeNorm = nome.toLowerCase().trim();
     var webNorm = web ? web.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
 
-    // Tutte le ricerche in parallelo
+    // Tutte le ricerche in parallelo (senza recensioni - troppo lente)
     var risultati = await Promise.all([
       cercaPosizioneGoogle(nome, web, categoria, citta),
-      cercaSocial(nome, citta),
-      cercaRecensioni(lead.placeId, nome)
+      cercaSocial(nome, citta)
     ]);
 
     var seo = risultati[0];
     var social = risultati[1];
-    var recensioni = risultati[2];
+    var recensioni = null; // caricato in background dalla pagina
     var serpItems = (seo && seo.items) || [];
 
     // Competitor con SERP
@@ -453,30 +452,12 @@ app.post('/analisi', async function(req, res) {
     });
     body += '</div></div>';
 
-    // Recensioni Google
-    if (recensioni) {
-      var percColor = recensioni.perc_risposta >= 70 ? '#2e7d32' : recensioni.perc_risposta >= 30 ? '#e65100' : '#c62828';
-      var percLabel = recensioni.perc_risposta >= 70 ? 'Buona gestione' : recensioni.perc_risposta >= 30 ? 'Gestione parziale' : 'Scarsa gestione';
-      body += '<div style="margin-bottom:28px">';
-      body += '<div style="' + secStyle + '">Gestione Recensioni</div>';
-      body += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
-      body += '<div style="flex:1;min-width:100px;' + boxStyle + ';text-align:center;margin-bottom:0"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Totale</div><div style="font-size:2.2rem;font-weight:800;color:#1a1a1a">' + recensioni.totale_recensioni + '</div></div>';
-      body += '<div style="flex:1;min-width:100px;' + boxStyle + ';text-align:center;margin-bottom:0"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">% risposte</div><div style="font-size:2.2rem;font-weight:800;color:' + percColor + '">' + recensioni.perc_risposta + '%</div><div style="font-size:8.5pt;color:' + percColor + ';font-weight:600;margin-top:3px">' + percLabel + '</div></div>';
-      body += '<div style="flex:1;min-width:100px;' + boxStyle + ';text-align:center;margin-bottom:0"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Su ' + recensioni.campione + ' analizzate</div><div style="font-size:2.2rem;font-weight:800;color:#1a1a1a">' + recensioni.con_risposta + '/' + recensioni.campione + '</div></div>';
-      body += '</div>';
-      if (recensioni.ultima_recensione && recensioni.ultima_recensione.testo) {
-        var ur = recensioni.ultima_recensione;
-        var stars = ur.rating ? ['&#9733;&#9733;&#9733;&#9733;&#9733;','&#9733;&#9733;&#9733;&#9733;&#9734;','&#9733;&#9733;&#9733;&#9734;&#9734;','&#9733;&#9733;&#9734;&#9734;&#9734;','&#9733;&#9734;&#9734;&#9734;&#9734;'][Math.max(0,5-Math.round(ur.rating))] : '';
-        var sColor = ur.rating >= 4 ? '#2e7d32' : ur.rating >= 3 ? '#e65100' : '#c62828';
-        body += '<div style="background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px 16px">';
-        body += '<div style="font-size:8.5pt;color:#aaa;text-transform:uppercase;margin-bottom:6px">Ultima recensione' + (ur.time_ago ? ' (' + ur.time_ago + ')' : '') + '</div>';
-        if (stars) body += '<div style="font-size:11pt;color:' + sColor + ';margin-bottom:5px">' + stars + '</div>';
-        body += '<div style="font-size:9.5pt;color:#555;line-height:1.5;font-style:italic">&quot;' + ur.testo.slice(0,250).replace(/[<>]/g,'') + (ur.testo.length > 250 ? '...' : '') + '&quot;</div>';
-        body += '<div style="font-size:8.5pt;margin-top:6px;font-weight:600;color:' + (ur.ha_risposta ? '#2e7d32' : '#c62828') + '">' + (ur.ha_risposta ? 'Il proprietario ha risposto' : 'Nessuna risposta del proprietario') + '</div>';
-        body += '</div>';
-      }
-      body += '</div>';
-    }
+    // Placeholder recensioni - verranno caricate in background dalla pagina
+    body += '<div style="margin-bottom:28px" id="rec-section">';
+    body += '<div style="' + secStyle + '">Gestione Recensioni</div>';
+    body += '<div style="background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:20px;text-align:center;color:#aaa;font-size:9.5pt" id="rec-loading">';
+    body += '<div style="font-size:13pt;margin-bottom:6px">&#8987;</div>Analisi recensioni in corso...</div>';
+    body += '</div>';
 
     // 3. Competitor analisi
     body += '<div style="margin-bottom:28px">';
@@ -659,6 +640,37 @@ app.post('/analisi', async function(req, res) {
       'var BACKEND="https://leadagent-backend.onrender.com";' +
       'var LEAD=' + leadJson + ';' +
       'function chiudiPanCons(){document.getElementById("pannello-consulente").style.display="none";}' +
+      'function renderRecensioni(r){' +
+      '  var sec=document.getElementById("rec-section");if(!sec)return;' +
+      '  if(!r){sec.innerHTML="<div style=\"font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C\">Gestione Recensioni</div><div style=\"background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px;color:#aaa;font-size:9.5pt\">Dati recensioni non disponibili</div>";return;}' +
+      '  var pColor=r.perc_risposta>=70?"#2e7d32":r.perc_risposta>=30?"#e65100":"#c62828";' +
+      '  var pLabel=r.perc_risposta>=70?"Buona gestione":r.perc_risposta>=30?"Gestione parziale":"Scarsa gestione";' +
+      '  var html="<div style=\"font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C\">Gestione Recensioni</div>";' +
+      '  html+="<div style=\"display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px\">";' +
+      '  html+="<div style=\"flex:1;min-width:100px;background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:16px 18px;text-align:center\"><div style=\"font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px\">Totale</div><div style=\"font-size:2.2rem;font-weight:800\">"+r.totale_recensioni+"</div></div>";' +
+      '  html+="<div style=\"flex:1;min-width:100px;background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:16px 18px;text-align:center\"><div style=\"font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px\">% risposte</div><div style=\"font-size:2.2rem;font-weight:800;color:"+pColor+"\">"+r.perc_risposta+"%</div><div style=\"font-size:8.5pt;color:"+pColor+";font-weight:600;margin-top:3px\">"+pLabel+"</div></div>";' +
+      '  html+="<div style=\"flex:1;min-width:100px;background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:16px 18px;text-align:center\"><div style=\"font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px\">Su "+r.campione+" analizzate</div><div style=\"font-size:2.2rem;font-weight:800\">"+r.con_risposta+"/"+r.campione+"</div></div>";' +
+      '  html+="</div>";' +
+      '  if(r.ultima_recensione&&r.ultima_recensione.testo){' +
+      '    var ur=r.ultima_recensione;' +
+      '    var sColor=ur.rating>=4?"#2e7d32":ur.rating>=3?"#e65100":"#c62828";' +
+      '    var stars=["&#9733;&#9733;&#9733;&#9733;&#9733;","&#9733;&#9733;&#9733;&#9733;&#9734;","&#9733;&#9733;&#9733;&#9734;&#9734;","&#9733;&#9733;&#9734;&#9734;&#9734;","&#9733;&#9734;&#9734;&#9734;&#9734;"][Math.max(0,5-(ur.rating||0))];' +
+      '    html+="<div style=\"background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px 16px\">";' +
+      '    html+="<div style=\"font-size:8.5pt;color:#aaa;text-transform:uppercase;margin-bottom:6px\">Ultima recensione"+(ur.time_ago?" ("+ur.time_ago+")":"")+"</div>";' +
+      '    html+="<div style=\"font-size:11pt;color:"+sColor+";margin-bottom:5px\">"+stars+"</div>";' +
+      '    html+="<div style=\"font-size:9.5pt;color:#555;line-height:1.5;font-style:italic\">&quot;"+ur.testo.slice(0,250).replace(/[<>]/g,"")+(ur.testo.length>250?"...":"")+"&quot;</div>";' +
+      '    html+="<div style=\"font-size:8.5pt;margin-top:6px;font-weight:600;color:"+(ur.ha_risposta?"#2e7d32":"#c62828")+"\">"+(ur.ha_risposta?"Il proprietario ha risposto":"Nessuna risposta del proprietario")+"</div>";' +
+      '    html+="</div>";' +
+      '  }' +
+      '  sec.innerHTML=html;' +
+      '}' +
+      '(async function loadRecensioni(){' +
+      '  try{' +
+      '    var r=await fetch(BACKEND+"/analisi-recensioni",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({placeId:LEAD.placeId,nome:LEAD.nome})});' +
+      '    var d=await r.json();' +
+      '    renderRecensioni(d.recensioni);' +
+      '  }catch(e){renderRecensioni(null);}' +
+      '})();' +
       'function mostraPannelloProposta(){' +
       '  var pan=document.getElementById("pannello-consulente");' +
       '  pan.style.display=pan.style.display==="none"?"block":"none";' +
@@ -1057,6 +1069,19 @@ app.post('/analisi-proposta', async function(req, res) {
   }
 });
 
+
+
+// Endpoint separato per recensioni - chiamato in background dalla pagina
+app.post('/analisi-recensioni', async function(req, res) {
+  try {
+    var placeId = req.body.placeId || null;
+    var nome = req.body.nome || '';
+    var rec = await cercaRecensioni(placeId, nome);
+    res.json({ recensioni: rec });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const { router: proposalRouter } = require('./proposal');
 app.use('/proposal', proposalRouter);
