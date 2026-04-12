@@ -640,10 +640,17 @@ app.post('/analisi', async function(req, res) {
       '<div class="body">' +
       '<div class="no-print">' +
       '<button class="btn-a btn-red" onclick="window.print()">Stampa / Salva PDF</button>' +
-      '<button class="btn-a btn-dark" id="btn-proposta" onclick="generaProposta()">Genera Proposta Commerciale</button>' +
+      '<button class="btn-a btn-dark" id="btn-proposta" onclick="mostraPannelloProposta()">Genera Proposta</button>' +
       (web ? '<button class="btn-a btn-green" id="btn-anteprima" onclick="generaAnteprima()">Anteprima Sito</button>' : '') +
       '<button class="btn-a btn-gray" onclick="window.close()">Chiudi</button>' +
       '</div>' +
+      '<div id="pannello-consulente" style="display:none;background:#fff9e6;border:1px solid #ffe082;border-radius:8px;padding:14px 18px;margin-bottom:16px;display:none">' +
+      '<div style="font-size:10pt;font-weight:600;color:#795548;margin-bottom:10px">Inserisci il nome del consulente per la proposta:</div>' +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<input id="input-consulente" type="text" placeholder="Nome Cognome" style="flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:10pt;min-width:200px">' +
+      '<button onclick="generaProposta()" style="padding:8px 18px;background:#E8001C;color:white;border:none;border-radius:6px;font-size:10pt;font-weight:600;cursor:pointer">Genera</button>' +
+      '<button onclick="chiudiPanCons()" style="padding:8px 14px;background:#f5f5f5;color:#555;border:1px solid #ddd;border-radius:6px;font-size:10pt;cursor:pointer">Annulla</button>' +
+      '</div></div>' +
       body +
       sezioneStrategia +
       '<div id="proposta-wrap"></div>' +
@@ -651,11 +658,18 @@ app.post('/analisi', async function(req, res) {
       '<script>' +
       'var BACKEND="https://leadagent-backend.onrender.com";' +
       'var LEAD=' + leadJson + ';' +
+      'function chiudiPanCons(){document.getElementById("pannello-consulente").style.display="none";}' +
+      'function mostraPannelloProposta(){' +
+      '  var pan=document.getElementById("pannello-consulente");' +
+      '  pan.style.display=pan.style.display==="none"?"block":"none";' +
+      '  if(pan.style.display==="block"){document.getElementById("input-consulente").focus();}' +
+      '}' +
       'async function generaProposta(){' +
+      '  var consulente=document.getElementById("input-consulente").value.trim()||"Consulente Pagine Si!";' +
+      '  document.getElementById("pannello-consulente").style.display="none";' +
       '  var btn=document.getElementById("btn-proposta");' +
       '  btn.disabled=true;btn.textContent="Generazione in corso...";' +
       '  try{' +
-      '    var consulente=prompt("Nome del consulente:","") || "Consulente Pagine Si!";' +
       '    var r=await fetch(BACKEND+"/proposal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:LEAD,consulente:consulente})});' +
       '    var d=await r.json();' +
       '    if(d.error)throw new Error(d.error);' +
@@ -669,7 +683,7 @@ app.post('/analisi', async function(req, res) {
       '      wrap.scrollIntoView({behavior:"smooth"});' +
       '      btn.textContent="Proposta generata";' +
       '    }' +
-      '  }catch(e){alert("Errore: "+e.message);btn.disabled=false;btn.textContent="Genera Proposta Commerciale";}' +
+      '  }catch(e){console.error("Errore proposta:",e);btn.disabled=false;btn.textContent="Genera Proposta";}' +
       '}' +
       'async function generaAnteprima(){' +
       '  var btn=document.getElementById("btn-anteprima");' +
@@ -678,7 +692,7 @@ app.post('/analisi', async function(req, res) {
       '    var r=await fetch(BACKEND+"/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({nome:LEAD.nome,indirizzo:LEAD.indirizzo,telefono:LEAD.telefono,tipi:LEAD.tipi,rating:LEAD.rating,nRating:LEAD.nRating,descrizione:LEAD.descrizione})});' +
       '    var d=await r.json();' +
       '    if(d.html){var b=new Blob([d.html],{type:"text/html;charset=utf-8"});var u=URL.createObjectURL(b);window.open(u,"_blank");setTimeout(function(){URL.revokeObjectURL(u);},10000);}' +
-      '  }catch(e){alert("Errore anteprima: "+e.message);}' +
+      '  }catch(e){console.error("Errore anteprima:",e);}' +
       '  if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}' +
       '}' +
       '</script>' +
