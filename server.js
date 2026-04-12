@@ -664,7 +664,7 @@ app.post('/proposta-inline', async function(req, res) {
 });
 
 
-// Endpoint che restituisce HTML direttamente (aperto da form POST in nuova tab)
+
 app.post('/analisi-html', async function(req, res) {
   try {
     var lead = typeof req.body.lead === 'string' ? JSON.parse(req.body.lead) : req.body.lead;
@@ -910,7 +910,7 @@ app.post('/analisi-html', async function(req, res) {
 });
 
 
-// Loading page - risponde subito con spinner, poi carica analisi in background
+
 app.post('/analisi-loading', async function(req, res) {
   try {
     var lead = typeof req.body.lead === 'string' ? JSON.parse(req.body.lead) : req.body.lead;
@@ -957,7 +957,7 @@ app.post('/analisi-loading', async function(req, res) {
 });
 
 
-// Compute analisi - fa tutto il lavoro, restituisce JSON {html}
+
 app.post('/analisi-compute', async function(req, res) {
   try {
     var lead = req.body.lead;
@@ -1164,3 +1164,284 @@ app.use('/proposal', proposalRouter);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, function(){ console.log('LeadAgent Backend running on port ' + PORT); });
+
+// Analisi: loading page immediata
+app.post('/analisi-loading', function(req, res) {
+  try {
+    var raw = req.body.lead;
+    var lead = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    var nome = (lead && lead.nome) || 'Attivita';
+    var safeData = JSON.stringify(lead)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r');
+    res.send([
+      '<!DOCTYPE html><html><head><meta charset="UTF-8">',
+      '<title>Analisi - ' + nome.replace(/</g,'&lt;') + '</title>',
+      '<style>',
+      'body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;display:flex;align-items:center;justify-content:center;min-height:100vh}',
+      '.box{text-align:center;padding:40px}',
+      '.sp{width:50px;height:50px;border:4px solid #eee;border-top:4px solid #E8001C;border-radius:50%;animation:sp 1s linear infinite;margin:0 auto 20px}',
+      '@keyframes sp{to{transform:rotate(360deg)}}',
+      '.bar{width:280px;height:4px;background:#eee;border-radius:2px;margin:20px auto 0;overflow:hidden}',
+      '.fill{height:4px;background:#E8001C;width:0;border-radius:2px;transition:width 38s linear}',
+      '</style></head><body>',
+      '<div class="box">',
+      '<div class="sp"></div>',
+      '<div style="font-size:15pt;font-weight:700;color:#E8001C;margin-bottom:8px">Analisi in corso</div>',
+      '<div style="color:#777;font-size:10pt">Raccolta dati reali da Google, DataForSEO e AI</div>',
+      '<div style="color:#aaa;font-size:9pt;margin-top:4px">20-40 secondi...</div>',
+      '<div class="bar"><div class="fill" id="f"></div></div>',
+      '</div>',
+      '<script>',
+      'setTimeout(function(){document.getElementById("f").style.width="90%"},300);',
+      'fetch("https://leadagent-backend.onrender.com/analisi-compute",{',
+      '  method:"POST",',
+      '  headers:{"Content-Type":"application/json"},',
+      '  body:JSON.stringify({lead:\'' + safeData + '\'})  ',
+      '})',
+      '.then(function(r){return r.json();})',
+      '.then(function(d){',
+      '  if(d.html){document.open();document.write(d.html);document.close();}',
+      '  else{document.body.innerHTML="<div style=\'padding:2rem;color:#E8001C\'>Errore: "+JSON.stringify(d)+"</div>";}',
+      '})',
+      '.catch(function(e){',
+      '  document.body.innerHTML="<div style=\'padding:2rem;color:#E8001C;font-family:Arial\'>Errore: "+e.message+"</div>";',
+      '});',
+      '</script></body></html>'
+    ].join(''));
+  } catch(err) {
+    res.status(500).send('<html><body>Errore: ' + err.message + '</body></html>');
+  }
+});
+
+// Analisi: esegue tutto il lavoro e restituisce HTML completo
+app.post('/analisi-compute', async function(req, res) {
+  try {
+    var raw = req.body.lead;
+    var lead = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!lead) return res.status(400).json({ error: 'Lead mancante' });
+    var nome = lead.nome || '';
+    var categoria = lead.categoria || '';
+    var citta = lead.citta || '';
+    var web = (lead.web && lead.web !== 'N/D') ? lead.web : null;
+    var nRating = lead.nRating || 0;
+    var rating = lead.rating || null;
+    var nomeNorm = nome.toLowerCase().trim();
+    var webNorm = web ? web.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
+
+    // Task recensioni subito
+    var recTaskId = null;
+    try {
+      var payload = [{ depth: 50, sort_by: 'newest', location_code: 2380, language_code: 'it' }];
+      if (lead.placeId) { payload[0].place_id = lead.placeId; } else { payload[0].keyword = nome + ' ' + citta; }
+      var pr = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_post', {
+        method: 'POST', headers: { 'Authorization': dfsAuth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      var pd = await pr.json();
+      recTaskId = pd.tasks && pd.tasks[0] && pd.tasks[0].id;
+    } catch(e) {}
+
+    // Ricerche parallele
+    var ris = await Promise.all([cercaPosizioneGoogle(nome, web, categoria, citta), cercaSocial(nome, citta)]);
+    var seo = ris[0], social = ris[1];
+    var serpItems = (seo && seo.items) || [];
+    var keyword = (seo && seo.keyword) || (categoria + ' ' + citta);
+    var mapsData = await cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems);
+    var competitor = mapsData.competitor, mapsPos = mapsData.posizione_maps_lead;
+
+    // Recensioni
+    var recensioni = null;
+    if (recTaskId) {
+      for (var a = 0; a < 8; a++) {
+        await new Promise(function(r){ setTimeout(r, 2000); });
+        try {
+          var gr = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_get/' + recTaskId, { headers: { 'Authorization': dfsAuth() } });
+          var gd = await gr.json();
+          var tk = gd.tasks && gd.tasks[0];
+          if (tk && tk.status_code === 20000 && tk.result && tk.result[0]) {
+            var r0 = tk.result[0], its = r0.items || [];
+            var risp = its.filter(function(r){ return !!r.owner_answer; }).length;
+            recensioni = {
+              totale_recensioni: nRating || r0.reviews_count || its.length,
+              campione: its.length, con_risposta: risp,
+              perc_risposta: its.length > 0 ? Math.round((risp / its.length) * 100) : 0,
+              positive: its.filter(function(r){ return r.rating && r.rating.value >= 4; }).length,
+              negative: its.filter(function(r){ return r.rating && r.rating.value <= 2; }).length,
+              testi: its.slice(0, 20).map(function(r){ return { rating: r.rating && r.rating.value, testo: r.review_text || '', ha_risposta: !!r.owner_answer, time_ago: r.time_ago || '' }; }),
+              ultima: its[0] ? { rating: its[0].rating && its[0].rating.value, testo: its[0].review_text || '', ha_risposta: !!its[0].owner_answer, time_ago: its[0].time_ago || '' } : null
+            };
+            break;
+          }
+        } catch(e) {}
+      }
+    }
+
+    // Visibilita AI
+    var ai = await calcolaAI(nome, citta, web, social, nRating, rating, seo);
+
+    // Claude (Haiku, veloce)
+    var strategia = null;
+    try {
+      var recT = recensioni && recensioni.testi ? recensioni.testi.slice(0, 8).map(function(r){ return (r.rating || '?') + '/5: ' + r.testo.slice(0, 60); }).join(' | ') : 'nessuna';
+      var dati = 'Attivita: ' + nome + ' (' + categoria + ' ' + citta + '). Sito: ' + (web || 'assente') + '. Rating: ' + (rating || 'N/D') + '/5 (' + nRating + ' rec). Google: ' + (seo && seo.posizione ? '#' + seo.posizione : 'N/T') + '. Maps: ' + (mapsPos ? '#' + mapsPos : 'N/T') + '. FB:' + (social.facebook ? 'si' : 'no') + ' IG:' + (social.instagram ? 'si' : 'no') + '. Risp:' + (recensioni ? recensioni.perc_risposta + '%' : 'N/D') + ' pos:' + (recensioni ? recensioni.positive : 0) + ' neg:' + (recensioni ? recensioni.negative : 0) + '. Rec: ' + recT + '. Comp: ' + competitor.map(function(c){ return c.nome + ' Maps#' + c.posizione_maps + ' ' + (c.rating || '?') + '/5'; }).join(', ');
+      var prompt = 'Sei un digital marketing strategist per PMI italiane. Dati: ' + dati + '. Scrivi max 300 parole con **Titolo** per: **Situazione Attuale** **Analisi Recensioni** **Obiettivi 90gg** **Obiettivi 6 mesi** **Strategia Social** **Priorita Intervento**';
+      var aiR = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 600, messages: [{ role: 'user', content: prompt }] })
+      });
+      var aiD = await aiR.json();
+      if (aiD.content && aiD.content[0] && aiD.content[0].text) {
+        strategia = aiD.content[0].text
+          .split('**').map(function(t, i){ return i % 2 === 1 ? '<strong>' + t + '</strong>' : t; }).join('')
+          .split('\n\n').join('</p><p style="margin-bottom:10px">')
+          .split('\n').join('<br>');
+      }
+    } catch(e) {}
+
+    // Proposta automatica
+    var proposalHtml = '';
+    try {
+      var pMod = require('./proposal');
+      var fatturato = pMod.stimaFatturato(lead);
+      var analisiBase = pMod.analisiDigitale(lead);
+      var prodotti = pMod.costruisciPreventivo(lead, fatturato, analisiBase);
+      var oggi2 = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+      var scad = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+      var tot1 = prodotti.reduce(function(s, p){ return s + (p.anno1 || 0); }, 0);
+      var totM = prodotti.reduce(function(s, p){ return s + (p.mens || 0); }, 0);
+      var righe = prodotti.map(function(p){
+        return '<tr style="border-bottom:1px solid #f0f0f0">' +
+          '<td style="padding:8px 10px;font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600">' + p.sigla + '</td>' +
+          '<td style="padding:8px 10px"><div style="font-weight:600;margin-bottom:2px" contenteditable="true">' + p.nome + '</div><div style="font-size:8.5pt;color:#777" contenteditable="true">' + p.desc + '</div></td>' +
+          '<td style="padding:8px 10px"><span style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt">' + p.cat + '</span></td>' +
+          '<td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">' + (p.anno1 ? '&euro; ' + p.anno1.toLocaleString('it-IT') : '&mdash;') + '</td>' +
+          '<td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">' + (p.mens ? '&euro; ' + p.mens + '/mese' : '&mdash;') + '</td>' +
+          '</tr>';
+      }).join('');
+      proposalHtml = '<hr style="border:none;border-top:3px solid #E8001C;margin:32px 0 24px">' +
+        '<div style="font-size:10.5pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;padding-bottom:6px;border-bottom:2px solid #E8001C">Proposta Commerciale</div>' +
+        '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:9pt;color:#aaa"><span>Data: ' + oggi2 + '</span><span>Valida fino: ' + scad + '</span></div>' +
+        '<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
+        '<thead><tr style="background:#111;color:white"><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Sigla</th><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Prodotto</th><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Area</th><th style="padding:8px 10px;text-align:right;font-size:8.5pt">Anno 1</th><th style="padding:8px 10px;text-align:right;font-size:8.5pt">Mensile</th></tr></thead>' +
+        '<tbody>' + righe + '</tbody></table>' +
+        '<div style="background:#111;color:white;border-radius:8px;padding:16px 22px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:12px">' +
+        '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Investimento Anno 1</div><div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; ' + tot1.toLocaleString('it-IT') + '</div><div style="font-size:8pt;color:rgba(255,255,255,0.3)">IVA esclusa</div></div>' +
+        '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Canone Mensile</div><div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; ' + totM + '<span style="font-size:10pt;color:rgba(255,255,255,0.4)">/mese</span></div></div>' +
+        '</div>' +
+        '<div style="font-size:8.5pt;color:#bbb;text-align:center;margin-top:8px">Pagine Si! SpA &middot; paginesispa.it &middot; Prezzi IVA esclusa</div>';
+    } catch(e) {}
+
+    // Genera HTML finale
+    var s = 'font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C';
+    var b = 'background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px 18px;margin-bottom:8px';
+    var oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+    var body = '';
+
+    // POSIZIONAMENTO
+    var gPos = seo && seo.posizione;
+    var gC = gPos ? (gPos <= 10 ? '#2e7d32' : gPos <= 30 ? '#e65100' : '#c62828') : '#c62828';
+    var mC = mapsPos ? (mapsPos <= 3 ? '#2e7d32' : mapsPos <= 7 ? '#e65100' : '#c62828') : '#9e9e9e';
+    body += '<div style="margin-bottom:24px"><div style="' + s + '">Posizionamento - ' + keyword + '</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
+    body += '<div style="flex:1;min-width:120px;' + b + ';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Google Organico</div><div style="font-size:2.6rem;font-weight:800;color:' + gC + '">' + (gPos ? '#' + gPos : (seo && seo.no_sito ? 'N/sito' : 'N/T')) + '</div><div style="font-size:8.5pt;color:' + gC + ';font-weight:600;margin-top:4px">' + (gPos ? (gPos <= 10 ? 'Prima pagina' : gPos <= 30 ? 'Pagine 2-3' : 'Oltre pag.3') : (seo && seo.no_sito ? 'Senza sito' : 'Non trovato')) + '</div></div>';
+    body += '<div style="flex:1;min-width:120px;' + b + ';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Google Maps</div><div style="font-size:2.6rem;font-weight:800;color:' + mC + '">' + (mapsPos ? '#' + mapsPos : 'N/T') + '</div><div style="font-size:8.5pt;color:' + mC + ';font-weight:600;margin-top:4px">' + (mapsPos ? (mapsPos <= 3 ? 'Top 3' : 'Pos. ' + mapsPos) : 'Non trovato') + '</div></div>';
+    body += '</div></div>';
+
+    // PRESENZA DIGITALE
+    body += '<div style="margin-bottom:24px"><div style="' + s + '">Presenza Digitale</div><div style="display:flex;gap:10px;flex-wrap:wrap">';
+    [{label:'Sito Web',val:web?'Presente':'Assente',ok:!!web,link:web},{label:'Maps',val:nRating>0?nRating+' rec.':'Assente',ok:nRating>=20},{label:'Rating',val:rating?rating+'/5':'N/D',ok:rating>=4.0},{label:'Facebook',val:social.facebook?(social.facebook_follower||'Trovato'):'Assente',ok:!!social.facebook,link:social.facebook},{label:'Instagram',val:social.instagram?(social.instagram_follower||'Trovato'):'Assente',ok:!!social.instagram,link:social.instagram}].forEach(function(item){
+      var bg = item.ok ? '#e8f5e9' : '#fce8e8', col = item.ok ? '#2e7d32' : '#c62828';
+      body += '<div style="flex:1;min-width:90px;background:' + bg + ';border-radius:8px;padding:10px;text-align:center"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:4px">' + item.label + '</div>' + (item.link ? '<a href="' + item.link + '" target="_blank" style="font-size:9pt;font-weight:700;color:' + col + ';text-decoration:none">' + item.val + '</a>' : '<div style="font-size:9pt;font-weight:700;color:' + col + '">' + item.val + '</div>') + '</div>';
+    });
+    body += '</div></div>';
+
+    // RECENSIONI
+    if (recensioni) {
+      var pC = recensioni.perc_risposta >= 70 ? '#2e7d32' : recensioni.perc_risposta >= 30 ? '#e65100' : '#c62828';
+      var pL = recensioni.perc_risposta >= 70 ? 'Buona gestione' : recensioni.perc_risposta >= 30 ? 'Parziale' : 'Scarsa';
+      var st5 = ['&#9733;&#9733;&#9733;&#9733;&#9733;','&#9733;&#9733;&#9733;&#9733;&#9734;','&#9733;&#9733;&#9733;&#9734;&#9734;','&#9733;&#9733;&#9734;&#9734;&#9734;','&#9733;&#9734;&#9734;&#9734;&#9734;'];
+      body += '<div style="margin-bottom:24px"><div style="' + s + '">Gestione Recensioni</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+      body += '<div style="flex:1;min-width:90px;' + b + ';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">Totale</div><div style="font-size:2rem;font-weight:800">' + recensioni.totale_recensioni + '</div></div>';
+      body += '<div style="flex:1;min-width:90px;' + b + ';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">% Risposte</div><div style="font-size:2rem;font-weight:800;color:' + pC + '">' + recensioni.perc_risposta + '%</div><div style="font-size:8pt;color:' + pC + ';font-weight:600">' + pL + '</div></div>';
+      body += '<div style="flex:1;min-width:90px;' + b + ';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">Pos/Neg</div><div style="font-size:1.6rem;font-weight:800"><span style="color:#2e7d32">' + recensioni.positive + '</span> / <span style="color:#c62828">' + recensioni.negative + '</span></div><div style="font-size:8pt;color:#aaa">su ' + recensioni.campione + ' anal.</div></div>';
+      body += '</div>';
+      if (recensioni.ultima && recensioni.ultima.testo) {
+        var ur = recensioni.ultima, sC = ur.rating >= 4 ? '#2e7d32' : ur.rating >= 3 ? '#e65100' : '#c62828';
+        body += '<div style="' + b + '"><div style="font-size:8.5pt;color:#aaa;text-transform:uppercase;margin-bottom:6px">Ultima' + (ur.time_ago ? ' (' + ur.time_ago + ')' : '') + '</div>';
+        if (ur.rating) body += '<div style="font-size:10pt;color:' + sC + ';margin-bottom:5px">' + st5[Math.max(0, 5 - Math.round(ur.rating))] + '</div>';
+        body += '<div style="font-size:9.5pt;color:#555;line-height:1.5;font-style:italic">&quot;' + ur.testo.slice(0, 280).replace(/[<>&]/g, function(c){ return c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;'; }) + (ur.testo.length > 280 ? '...' : '') + '&quot;</div>';
+        body += '<div style="font-size:8.5pt;margin-top:6px;font-weight:600;color:' + (ur.ha_risposta ? '#2e7d32' : '#c62828') + '">' + (ur.ha_risposta ? 'Proprietario ha risposto' : 'Nessuna risposta') + '</div></div>';
+      }
+      body += '</div>';
+    }
+
+    // COMPETITOR
+    if (competitor && competitor.length) {
+      body += '<div style="margin-bottom:24px"><div style="' + s + '">Competitor di Zona</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:9.5pt"><thead><tr style="background:#111;color:white"><th style="padding:8px 10px;text-align:left">Attivita</th><th style="padding:8px 10px;text-align:center">Maps</th><th style="padding:8px 10px;text-align:center">Google</th><th style="padding:8px 10px;text-align:center">Rating</th><th style="padding:8px 10px;text-align:center">Rec.</th><th style="padding:8px 10px;text-align:center">% Risp.</th><th style="padding:8px 10px;text-align:center">Sito</th></tr></thead><tbody>';
+      competitor.forEach(function(c, i) {
+        body += '<tr style="background:' + (i % 2 === 0 ? 'white' : '#fafafa') + ';border-bottom:1px solid #f0f0f0">';
+        body += '<td style="padding:8px 10px;font-weight:600">' + c.nome.replace(/[<>]/g,'') + (c.sito_dom ? '<br><span style="font-size:8pt;color:#1565c0">' + c.sito_dom + '</span>' : '') + '</td>';
+        body += '<td style="padding:8px 10px;text-align:center"><span style="background:#e8f5e9;color:#2e7d32;padding:2px 7px;border-radius:4px;font-weight:700">#' + c.posizione_maps + '</span></td>';
+        body += '<td style="padding:8px 10px;text-align:center">' + (c.posizione_serp ? '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 7px;border-radius:4px;font-weight:700">#' + c.posizione_serp + '</span>' : '<span style="color:#aaa">N/T</span>') + '</td>';
+        body += '<td style="padding:8px 10px;text-align:center">' + (c.rating ? '<strong>' + c.rating + '</strong>/5' : 'N/D') + '</td>';
+        body += '<td style="padding:8px 10px;text-align:center">' + c.n_recensioni + '</td>';
+        body += '<td style="padding:8px 10px;text-align:center">' + (c.rec_comp ? '<span style="font-weight:700;color:' + (c.rec_comp.perc >= 70 ? '#2e7d32' : c.rec_comp.perc >= 30 ? '#e65100' : '#c62828') + '">' + c.rec_comp.perc + '%</span>' : '<span style="color:#aaa">N/D</span>') + '</td>';
+        body += '<td style="padding:8px 10px;text-align:center">' + (c.ha_sito ? '<span style="color:#2e7d32;font-weight:700">Si</span>' : '<span style="color:#c62828;font-weight:700">No</span>') + '</td></tr>';
+      });
+      body += '</tbody></table></div></div>';
+    }
+
+    // SOCIAL
+    if (social.facebook || social.instagram) {
+      body += '<div style="margin-bottom:24px"><div style="' + s + '">Profili Social</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
+      if (social.facebook) body += '<div style="flex:1;min-width:140px;border:1px solid #1877f2;border-radius:10px;overflow:hidden"><div style="background:#1877f2;padding:8px 14px"><span style="color:white;font-weight:700">Facebook</span></div><div style="padding:10px 14px">' + (social.facebook_follower ? '<div style="font-size:1.2rem;font-weight:800;color:#1877f2;margin-bottom:5px">' + social.facebook_follower + '</div>' : '') + '<a href="' + social.facebook + '" target="_blank" style="display:inline-block;padding:5px 12px;background:#1877f2;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri</a></div></div>';
+      if (social.instagram) body += '<div style="flex:1;min-width:140px;border:1px solid #e1306c;border-radius:10px;overflow:hidden"><div style="background:#e1306c;padding:8px 14px"><span style="color:white;font-weight:700">Instagram</span></div><div style="padding:10px 14px">' + (social.instagram_follower ? '<div style="font-size:1.2rem;font-weight:800;color:#e1306c;margin-bottom:5px">' + social.instagram_follower + '</div>' : '') + '<a href="' + social.instagram + '" target="_blank" style="display:inline-block;padding:5px 12px;background:#e1306c;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri</a></div></div>';
+      body += '</div></div>';
+    }
+
+    // VISIBILITA AI
+    body += '<div style="margin-bottom:24px"><div style="' + s + '">Visibilita su AI (Gemini, ChatGPT)</div><div style="display:flex;gap:14px;flex-wrap:wrap">';
+    body += '<div style="' + b + ';flex-shrink:0;text-align:center;min-width:100px"><div style="font-size:3rem;font-weight:800;color:' + ai.colore + '">' + ai.score + '</div><div style="font-size:8.5pt;color:' + ai.colore + ';font-weight:700;margin-top:4px">' + ai.livello + '</div><div style="font-size:8pt;color:#aaa">su 100</div></div>';
+    body += '<div style="flex:1;' + b + '"><div style="font-size:9pt;color:#555;margin-bottom:10px">Le AI generative citano attivita presenti su fonti autorevoli. Piu fonti = piu visibilita per "' + categoria + ' a ' + citta + '".</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">';
+    (ai.fonti || []).forEach(function(f){ body += '<div style="display:flex;align-items:center;gap:5px;font-size:9pt"><span style="color:' + (f.ok ? '#2e7d32' : '#c62828') + ';font-weight:700">' + (f.ok ? '&#10003;' : '&#10007;') + '</span><span style="color:' + (f.ok ? '#2e7d32' : '#888') + '">' + f.label + '</span></div>'; });
+    body += '</div></div></div></div>';
+
+    // ANALISI STRATEGICA
+    if (strategia) {
+      body += '<div style="margin-bottom:24px"><div style="' + s + '">Analisi Strategica e Obiettivi</div><div style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;font-size:9.5pt;color:#1a1a1a;line-height:1.7"><p style="margin-bottom:10px">' + strategia + '</p></div></div>';
+    }
+
+    body += proposalHtml;
+
+    var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Analisi - ' + nome.replace(/[<>]/g,'') + '</title>' +
+      '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}' +
+      '.pg{max-width:900px;margin:24px auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)}' +
+      '@media print{body{background:white}.pg{box-shadow:none;margin:0;border-radius:0}.no-print{display:none!important}}</style></head><body>' +
+      '<div class="pg">' +
+      '<div style="background:#111;padding:20px 28px;display:flex;justify-content:space-between;align-items:center">' +
+      '<div><div style="font-size:13pt;font-weight:700;color:white">Analisi Digitale Prevendita</div><div style="font-size:9pt;color:rgba(255,255,255,0.5);margin-top:2px">Lead Agent - Pagine Si!</div></div>' +
+      '<div style="font-size:8.5pt;color:rgba(255,255,255,0.4)">' + oggi + '</div></div>' +
+      '<div style="border-left:5px solid #E8001C;padding:13px 22px;margin:18px 26px 0;border-radius:0 8px 8px 0;border:1px solid #eee;border-left:5px solid #E8001C">' +
+      '<div style="font-size:12pt;font-weight:700;margin-bottom:4px">' + nome.replace(/[<>]/g,'') + '</div>' +
+      '<div style="font-size:9pt;color:#777;display:flex;gap:14px;flex-wrap:wrap">' +
+      '<span>' + (lead.indirizzo || '').replace(/[<>]/g,'') + '</span>' +
+      (web ? '<span>Sito: <a href="' + web + '" target="_blank" style="color:#1565c0">' + web.replace(/[<>]/g,'') + '</a></span>' : '<span style="color:#c62828">Nessun sito</span>') +
+      '<span>Rating: ' + (rating ? rating + '/5 (' + nRating + ' rec.)' : 'N/D') + '</span>' +
+      '</div></div>' +
+      '<div style="padding:18px 26px 26px">' +
+      '<div class="no-print" style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;padding:14px 16px;background:#f9f9f9;border-radius:8px;border:1px solid #eee">' +
+      '<button onclick="window.print()" style="padding:9px 18px;background:#E8001C;color:white;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">Stampa / PDF</button>' +
+      '<button onclick="window.close()" style="padding:9px 18px;background:#555;color:white;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">Chiudi</button>' +
+      '</div>' +
+      body +
+      '</div></div>' +
+      '</body></html>';
+
+    res.json({ html: html });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
