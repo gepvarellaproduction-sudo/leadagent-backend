@@ -181,25 +181,67 @@ async function cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems) {
   return out;
 }
 
-// Visibilita AI score
-function calcolaAI(web, social, nRating, rating, seo) {
+// Visibilita AI - analizza fonti che alimentano le AI generative
+async function calcolaAI(nome, citta, web, social, nRating, rating, seo) {
   var score = 0, det = [];
-  if (nRating >= 100) { score += 25; det.push('Google Maps: ottimo ('+nRating+' recensioni)'); }
-  else if (nRating >= 30) { score += 15; det.push('Google Maps: buono ('+nRating+' recensioni)'); }
-  else if (nRating > 0) { score += 8; det.push('Google Maps: debole ('+nRating+' recensioni)'); }
-  else { det.push('Google Maps: assente'); }
-  if (rating >= 4.5) score += 15; else if (rating >= 4.0) score += 10; else if (rating >= 3.5) score += 5;
-  if (web) {
-    if (seo && seo.posizione && seo.posizione <= 10) { score += 20; det.push('Sito: prima pagina Google'); }
-    else if (seo && seo.posizione && seo.posizione <= 30) { score += 12; det.push('Sito: pagine 2-3 Google'); }
-    else { score += 6; det.push('Sito: presente ma non indicizzato'); }
-  } else { det.push('Sito web: assente'); }
-  if (social.facebook && social.instagram) { score += 20; det.push('Social: FB + IG presenti'); }
-  else if (social.facebook || social.instagram) { score += 10; det.push('Social: un profilo presente'); }
-  else { det.push('Social: assenti'); }
-  if (score >= 40) score += 5;
+  var fonti = [];
+
+  // Cerca presenza su fonti autorevoli via DataForSEO
+  try {
+    var items = await dfsSearch('"' + nome + '" ' + citta, 20);
+    var dominiTrovati = items.map(function(i){ return (i.domain||'').toLowerCase(); });
+
+    // TripAdvisor
+    var haTrip = dominiTrovati.some(function(d){ return d.includes('tripadvisor'); });
+    if (haTrip) { score += 10; fonti.push({ label: 'TripAdvisor', ok: true }); }
+    else { fonti.push({ label: 'TripAdvisor', ok: false }); }
+
+    // Pagine Gialle
+    var haGialle = dominiTrovati.some(function(d){ return d.includes('paginegialle'); });
+    if (haGialle) { score += 5; fonti.push({ label: 'Pagine Gialle', ok: true }); }
+    else { fonti.push({ label: 'Pagine Gialle', ok: false }); }
+
+    // Quotidiani/blog locali
+    var quotidiani = ['baritoday','lagazzettadelmezzogiorno','corriereditaranto','puglialive','noinotizie','brindisireport','tarantobuonsera'];
+    var haQuotidiani = dominiTrovati.some(function(d){ return quotidiani.some(function(q){ return d.includes(q); }); });
+    if (haQuotidiani) { score += 8; fonti.push({ label: 'Stampa locale online', ok: true }); }
+    else { fonti.push({ label: 'Stampa locale online', ok: false }); }
+
+    // Sito proprio indicizzato
+    if (web) {
+      var haWeb = dominiTrovati.some(function(d){ return d.includes(web.replace(/^https?:\/\/(www\.)?/,'').split('/')[0]); });
+      if (haWeb || (seo && seo.posizione && seo.posizione <= 30)) {
+        score += 15; fonti.push({ label: 'Sito web indicizzato', ok: true });
+      } else {
+        score += 5; fonti.push({ label: 'Sito web (non indicizzato)', ok: false });
+      }
+    } else {
+      fonti.push({ label: 'Sito web', ok: false });
+    }
+  } catch(e) {
+    // Fallback senza ricerca
+    if (web) { score += 8; fonti.push({ label: 'Sito web', ok: true }); }
+    else { fonti.push({ label: 'Sito web', ok: false }); }
+    fonti.push({ label: 'TripAdvisor', ok: false });
+    fonti.push({ label: 'Stampa locale', ok: false });
+  }
+
+  // Google Maps
+  if (nRating >= 100) { score += 20; fonti.push({ label: 'Google Maps ('+nRating+' rec.)', ok: true }); }
+  else if (nRating >= 30) { score += 12; fonti.push({ label: 'Google Maps ('+nRating+' rec.)', ok: true }); }
+  else if (nRating > 0) { score += 6; fonti.push({ label: 'Google Maps ('+nRating+' rec.)', ok: false }); }
+  else { fonti.push({ label: 'Google Maps', ok: false }); }
+
+  // Rating boost
+  if (rating >= 4.5) score += 10; else if (rating >= 4.0) score += 6; else if (rating >= 3.5) score += 3;
+
+  // Social
+  if (social.facebook && social.instagram) { score += 15; fonti.push({ label: 'Facebook + Instagram', ok: true }); }
+  else if (social.facebook || social.instagram) { score += 8; fonti.push({ label: social.facebook?'Facebook':'Instagram', ok: true }); fonti.push({ label: social.facebook?'Instagram':'Facebook', ok: false }); }
+  else { fonti.push({ label: 'Facebook', ok: false }); fonti.push({ label: 'Instagram', ok: false }); }
+
   score = Math.min(score, 100);
-  return { score: score, livello: score>=70?'ALTA':score>=40?'MEDIA':'BASSA', colore: score>=70?'#2e7d32':score>=40?'#e65100':'#c62828', dettagli: det };
+  return { score: score, livello: score>=70?'ALTA':score>=40?'MEDIA':'BASSA', colore: score>=70?'#2e7d32':score>=40?'#e65100':'#c62828', fonti: fonti };
 }
 
 //  Endpoint /analisi 
@@ -309,7 +351,7 @@ app.post('/analisi', async function(req, res) {
       }
     } catch(e) {}
 
-    var ai = calcolaAI(web, social, nRating, rating, seo);
+    var ai = await calcolaAI(nome, citta, web, social, nRating, rating, seo);
     var oggi = new Date().toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
     var sec = 'font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C';
     var box = 'background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px 18px;margin-bottom:8px';
@@ -398,13 +440,13 @@ app.post('/analisi', async function(req, res) {
     }
 
     // VISIBILITA AI
-    body += '<div style="margin-bottom:24px"><div style="'+sec+'">Visibilita su AI (Gemini, ChatGPT)</div><div style="display:flex;gap:14px;flex-wrap:wrap">';
+    body += '<div style="margin-bottom:24px"><div style="'+sec+'">Visibilita su AI (Gemini, ChatGPT)</div>';
+    body += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">';
     body += '<div style="'+box+';flex-shrink:0;text-align:center;min-width:110px"><div style="font-size:3rem;font-weight:800;color:'+ai.colore+'">'+ai.score+'</div><div style="font-size:8.5pt;color:'+ai.colore+';font-weight:700;margin-top:4px">'+ai.livello+'</div><div style="font-size:8pt;color:#aaa;margin-top:3px">su 100</div></div>';
-    body += '<div style="flex:1;'+box+'"><div style="font-size:9pt;color:#555;margin-bottom:8px">Le AI generative citano le attivita presenti su fonti autorevoli. Piu fonti = piu probabilita di essere citati per "'+categoria+' a '+citta+'".</div>';
-    body += '<div style="display:flex;flex-direction:column;gap:4px">';
-    ai.dettagli.forEach(function(d){
-      var isP=d.indexOf('ottimo')>-1||d.indexOf('buono')>-1||d.indexOf('prima')>-1||d.indexOf('presenti')>-1||d.indexOf('unico')>-1;
-      body += '<div style="font-size:9pt;color:'+(isP?'#2e7d32':'#c62828')+'">'+(isP?'+ ':'- ')+d+'</div>';
+    body += '<div style="flex:1;'+box+'"><div style="font-size:9pt;color:#555;margin-bottom:10px">Le AI generative (Gemini, ChatGPT) citano le attivita presenti su fonti che scansionano: Google Maps, TripAdvisor, sito web, social, stampa locale. Piu fonti presenti = piu probabilita di essere citati per "'+categoria+' a '+citta+'".</div>';
+    body += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
+    (ai.fonti||[]).forEach(function(f){
+      body += '<div style="display:flex;align-items:center;gap:6px;font-size:9pt"><span style="color:'+(f.ok?'#2e7d32':'#c62828')+';font-weight:700;font-size:11pt">'+(f.ok?'&#10003;':'&#10007;')+'</span><span style="color:'+(f.ok?'#2e7d32':'#c62828')+'">'+f.label+'</span></div>';
     });
     body += '</div></div></div></div>';
 
