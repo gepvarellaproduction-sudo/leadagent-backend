@@ -3,6 +3,7 @@ const cors = require('cors');
 const app = express();
 app.use(cors({ origin: function(origin, cb){ cb(null, true); } }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const GOOGLE_KEY = process.env.GOOGLE_API_KEY;
@@ -659,6 +660,252 @@ app.post('/proposta-inline', async function(req, res) {
     res.json({ html: html });
   } catch(err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+
+// Endpoint che restituisce HTML direttamente (aperto da form POST in nuova tab)
+app.post('/analisi-html', async function(req, res) {
+  try {
+    var lead = typeof req.body.lead === 'string' ? JSON.parse(req.body.lead) : req.body.lead;
+    if (!lead) return res.status(400).send('<html><body>Lead mancante</body></html>');
+
+    var nome = lead.nome || '';
+    var categoria = lead.categoria || '';
+    var citta = lead.citta || '';
+    var web = (lead.web && lead.web !== 'N/D') ? lead.web : null;
+    var nRating = lead.nRating || 0;
+    var rating = lead.rating || null;
+    var nomeNorm = nome.toLowerCase().trim();
+    var webNorm = web ? web.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
+
+    // Invia subito una loading page mentre elabora
+    // (non possiamo fare streaming facile, ma il browser mostra spinner nella tab)
+
+    // 1. Avvia task recensioni subito
+    var recTaskId = null;
+    try {
+      var payload = [{ depth: 50, sort_by: 'newest', location_code: 2380, language_code: 'it' }];
+      if (lead.placeId) { payload[0].place_id = lead.placeId; } else { payload[0].keyword = nome + ' ' + citta; }
+      var postResp = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_post', {
+        method: 'POST',
+        headers: { 'Authorization': dfsAuth(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      var postData = await postResp.json();
+      recTaskId = postData.tasks && postData.tasks[0] && postData.tasks[0].id;
+    } catch(e) {}
+
+    // 2. Ricerche in parallelo
+    var risultati = await Promise.all([
+      cercaPosizioneGoogle(nome, web, categoria, citta),
+      cercaSocial(nome, citta)
+    ]);
+    var seo = risultati[0];
+    var social = risultati[1];
+    var serpItems = (seo && seo.items) || [];
+    var keyword = (seo && seo.keyword) || (categoria + ' ' + citta);
+
+    // 3. Competitor
+    var mapsData = await cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems);
+    var competitor = mapsData.competitor;
+    var mapsPos = mapsData.posizione_maps_lead;
+
+    // 4. Raccogli recensioni
+    var recensioni = null;
+    if (recTaskId) {
+      for (var attempt = 0; attempt < 8; attempt++) {
+        await new Promise(function(r){ setTimeout(r, 2000); });
+        try {
+          var getResp = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_get/' + recTaskId, {
+            headers: { 'Authorization': dfsAuth() }
+          });
+          var getData = await getResp.json();
+          var task = getData.tasks && getData.tasks[0];
+          if (task && task.status_code === 20000 && task.result && task.result[0]) {
+            var result = task.result[0];
+            var items = result.items || [];
+            var totale = nRating || result.reviews_count || items.length;
+            var risposte = items.filter(function(r){ return !!r.owner_answer; }).length;
+            var pos = items.filter(function(r){ return r.rating && r.rating.value >= 4; }).length;
+            var neg = items.filter(function(r){ return r.rating && r.rating.value <= 2; }).length;
+            recensioni = {
+              totale_recensioni: totale, campione: items.length,
+              con_risposta: risposte,
+              perc_risposta: items.length > 0 ? Math.round((risposte/items.length)*100) : 0,
+              positive: pos, negative: neg,
+              testi: items.slice(0,20).map(function(r){ return { rating: r.rating&&r.rating.value, testo: r.review_text||'', ha_risposta: !!r.owner_answer, time_ago: r.time_ago||'' }; }),
+              ultima: items[0] ? { rating: items[0].rating&&items[0].rating.value, testo: items[0].review_text||'', ha_risposta: !!items[0].owner_answer, time_ago: items[0].time_ago||'' } : null
+            };
+            break;
+          }
+        } catch(e) {}
+      }
+    }
+
+    // 5. Visibilita AI
+    var ai = await calcolaAI(nome, citta, web, social, nRating, rating, seo);
+
+    // 6. Analisi Claude (prompt corto per stare nei tempi)
+    var strategia = null;
+    try {
+      var recTesti = recensioni && recensioni.testi ? recensioni.testi.slice(0,8).map(function(r){ return (r.rating||'?')+'/5: '+r.testo.slice(0,70); }).join(' | ') : 'nessuna';
+      var datiStr = 'Attivita: '+nome+' ('+categoria+' '+citta+'). Sito: '+(web||'assente')+'. Rating: '+(rating||'N/D')+'/5 ('+nRating+' rec). Google "'+keyword+'": '+(seo&&seo.posizione?'#'+seo.posizione:'non trovato')+'. Maps: '+(mapsPos?'#'+mapsPos:'non trovato')+'. FB: '+(social.facebook?'si':'no')+'. IG: '+(social.instagram?'si':'no')+'. Risposte rec: '+(recensioni?recensioni.perc_risposta+'%':'N/D')+' su '+(recensioni?recensioni.campione:0)+' ('+( recensioni?recensioni.positive+' pos, '+recensioni.negative+' neg':'')+  '). Rec: '+recTesti+'. Competitor: '+competitor.map(function(c){ return c.nome+' Maps#'+c.posizione_maps+' '+(c.rating||'N/D')+'/5'; }).join(', ');
+      var prompt = 'Sei un digital marketing strategist per PMI italiane. Dati: '+datiStr+'. Scrivi max 300 parole con **Titolo** per: **Situazione Attuale** **Analisi Recensioni** **Obiettivi 90gg** **Obiettivi 6 mesi** **Strategia Social** **Priorita Intervento**';
+      var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 600, messages: [{ role: 'user', content: prompt }] })
+      });
+      var aiData = await aiResp.json();
+      if (aiData.content && aiData.content[0] && aiData.content[0].text) {
+        strategia = aiData.content[0].text
+          .split('**').map(function(t,i){ return i%2===1 ? '<strong>'+t+'</strong>' : t; }).join('')
+          .split('\n\n').join('</p><p style="margin-bottom:10px">')
+          .split('\n').join('<br>');
+      }
+    } catch(e) {}
+
+    // Richiama /analisi per generare l'HTML (riuso la logica esistente)
+    // In realta usiamo lo stesso codice di /analisi ma restituiamo HTML direttamente
+    var req2 = { body: { lead: lead } };
+    var htmlResult = null;
+    // Simuliamo chiamata interna
+    var fakeRes = {
+      _html: null,
+      json: function(d){ this._html = d.html; }
+    };
+
+    // Costruiamo l'HTML direttamente qui con tutti i dati gia pronti
+    var oggi = new Date().toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
+    var sec = 'font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C';
+    var box = 'background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px 18px;margin-bottom:8px';
+    var body = '';
+
+    // POSIZIONAMENTO
+    var gPos = seo && seo.posizione;
+    var gColor = gPos ? (gPos<=10?'#2e7d32':gPos<=30?'#e65100':'#c62828') : '#c62828';
+    var gLabel = gPos ? '#'+gPos : (seo&&seo.no_sito?'Nessun sito':'N/T');
+    var mColor = mapsPos ? (mapsPos<=3?'#2e7d32':mapsPos<=7?'#e65100':'#c62828') : '#9e9e9e';
+    body += '<div style="margin-bottom:24px"><div style="'+sec+'">Posizionamento - '+keyword+'</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
+    body += '<div style="flex:1;min-width:120px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Google Organico</div><div style="font-size:2.6rem;font-weight:800;color:'+gColor+'">'+gLabel+'</div><div style="font-size:8.5pt;color:'+gColor+';font-weight:600;margin-top:4px">'+(gPos?(gPos<=10?'Prima pagina':gPos<=30?'Pagine 2-3':'Oltre pag. 3'):(seo&&seo.no_sito?'Senza sito':'Non trovato'))+'</div>'+(seo&&seo.url?'<div style="font-size:8pt;margin-top:5px"><a href="'+seo.url+'" target="_blank" style="color:#1565c0">'+seo.url.replace(/^https?:\/\/(www\.)?/,'').slice(0,35)+'</a></div>':'')+'</div>';
+    body += '<div style="flex:1;min-width:120px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Google Maps</div><div style="font-size:2.6rem;font-weight:800;color:'+mColor+'">'+(mapsPos?'#'+mapsPos:'N/T')+'</div><div style="font-size:8.5pt;color:'+mColor+';font-weight:600;margin-top:4px">'+(mapsPos?(mapsPos<=3?'Top 3':'Posizione '+mapsPos):'Non in lista')+'</div></div>';
+    body += '</div></div>';
+
+    // PRESENZA DIGITALE
+    body += '<div style="margin-bottom:24px"><div style="'+sec+'">Presenza Digitale</div><div style="display:flex;gap:10px;flex-wrap:wrap">';
+    [{label:'Sito Web',val:web?'Presente':'Assente',ok:!!web,link:web},{label:'Google Maps',val:nRating>0?nRating+' rec.':'Assente',ok:nRating>=20},{label:'Rating',val:rating?rating+'/5':'N/D',ok:rating>=4.0},{label:'Facebook',val:social.facebook?(social.facebook_follower||'Trovato'):'Assente',ok:!!social.facebook,link:social.facebook},{label:'Instagram',val:social.instagram?(social.instagram_follower||'Trovato'):'Assente',ok:!!social.instagram,link:social.instagram}].forEach(function(item){
+      var bg=item.ok?'#e8f5e9':'#fce8e8',col=item.ok?'#2e7d32':'#c62828';
+      body += '<div style="flex:1;min-width:100px;background:'+bg+';border-radius:8px;padding:12px;text-align:center"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">'+item.label+'</div>'+(item.link?'<a href="'+item.link+'" target="_blank" style="font-size:9.5pt;font-weight:700;color:'+col+';text-decoration:none">'+item.val+'</a>':'<div style="font-size:9.5pt;font-weight:700;color:'+col+'">'+item.val+'</div>')+'</div>';
+    });
+    body += '</div></div>';
+
+    // RECENSIONI
+    if (recensioni) {
+      var pColor=recensioni.perc_risposta>=70?'#2e7d32':recensioni.perc_risposta>=30?'#e65100':'#c62828';
+      var pLabel=recensioni.perc_risposta>=70?'Buona gestione':recensioni.perc_risposta>=30?'Gestione parziale':'Scarsa gestione';
+      var stars5=['&#9733;&#9733;&#9733;&#9733;&#9733;','&#9733;&#9733;&#9733;&#9733;&#9734;','&#9733;&#9733;&#9733;&#9734;&#9734;','&#9733;&#9733;&#9734;&#9734;&#9734;','&#9733;&#9734;&#9734;&#9734;&#9734;'];
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Gestione Recensioni</div>';
+      body += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+      body += '<div style="flex:1;min-width:100px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">Totale</div><div style="font-size:2rem;font-weight:800">'+recensioni.totale_recensioni+'</div></div>';
+      body += '<div style="flex:1;min-width:100px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">% Risposte</div><div style="font-size:2rem;font-weight:800;color:'+pColor+'">'+recensioni.perc_risposta+'%</div><div style="font-size:8pt;color:'+pColor+';font-weight:600;margin-top:3px">'+pLabel+'</div></div>';
+      body += '<div style="flex:1;min-width:100px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">Pos/Neg</div><div style="font-size:1.6rem;font-weight:800"><span style="color:#2e7d32">'+recensioni.positive+'</span> / <span style="color:#c62828">'+recensioni.negative+'</span></div><div style="font-size:8pt;color:#aaa;margin-top:3px">su '+recensioni.campione+' analizzate</div></div>';
+      body += '</div>';
+      if (recensioni.ultima && recensioni.ultima.testo) {
+        var ur=recensioni.ultima,sColor=ur.rating>=4?'#2e7d32':ur.rating>=3?'#e65100':'#c62828';
+        var stH=ur.rating?stars5[Math.max(0,5-Math.round(ur.rating))]:'';
+        body += '<div style="'+box+'"><div style="font-size:8.5pt;color:#aaa;text-transform:uppercase;margin-bottom:6px">Ultima recensione'+(ur.time_ago?' ('+ur.time_ago+')':'')+'</div>';
+        if (stH) body += '<div style="font-size:10pt;color:'+sColor+';margin-bottom:5px">'+stH+'</div>';
+        body += '<div style="font-size:9.5pt;color:#555;line-height:1.5;font-style:italic">&quot;'+ur.testo.slice(0,280).replace(/[<>]/g,'')+(ur.testo.length>280?'...':'')+'&quot;</div>';
+        body += '<div style="font-size:8.5pt;margin-top:6px;font-weight:600;color:'+(ur.ha_risposta?'#2e7d32':'#c62828')+'">'+(ur.ha_risposta?'Il proprietario ha risposto':'Nessuna risposta del proprietario')+'</div></div>';
+      }
+      body += '</div>';
+    }
+
+    // COMPETITOR
+    if (competitor && competitor.length) {
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Competitor di Zona</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:9.5pt"><thead><tr style="background:#111;color:white"><th style="padding:9px 10px;text-align:left">Attivita</th><th style="padding:9px 10px;text-align:center">Maps</th><th style="padding:9px 10px;text-align:center">Google</th><th style="padding:9px 10px;text-align:center">Rating</th><th style="padding:9px 10px;text-align:center">Rec.</th><th style="padding:9px 10px;text-align:center">% Risp.</th><th style="padding:9px 10px;text-align:center">Sito</th></tr></thead><tbody>';
+      competitor.forEach(function(c,i){
+        var bg=i%2===0?'white':'#fafafa';
+        body += '<tr style="background:'+bg+';border-bottom:1px solid #f0f0f0"><td style="padding:9px 10px;font-weight:600">'+c.nome+(c.sito_dom?'<br><span style="font-size:8pt;color:#1565c0">'+c.sito_dom+'</span>':'')+'</td>';
+        body += '<td style="padding:9px 10px;text-align:center"><span style="background:#e8f5e9;color:#2e7d32;padding:2px 7px;border-radius:4px;font-weight:700">#'+c.posizione_maps+'</span></td>';
+        body += '<td style="padding:9px 10px;text-align:center">'+(c.posizione_serp?'<span style="background:#e8f5e9;color:#2e7d32;padding:2px 7px;border-radius:4px;font-weight:700">#'+c.posizione_serp+'</span>':'<span style="color:#aaa">N/T</span>')+'</td>';
+        body += '<td style="padding:9px 10px;text-align:center">'+(c.rating?'<strong>'+c.rating+'</strong>/5':'N/D')+'</td>';
+        body += '<td style="padding:9px 10px;text-align:center">'+c.n_recensioni+'</td>';
+        body += '<td style="padding:9px 10px;text-align:center">'+(c.rec_comp?'<span style="font-weight:700;color:'+(c.rec_comp.perc>=70?'#2e7d32':c.rec_comp.perc>=30?'#e65100':'#c62828')+'">'+c.rec_comp.perc+'%</span>':'<span style="color:#aaa">N/D</span>')+'</td>';
+        body += '<td style="padding:9px 10px;text-align:center">'+(c.ha_sito?'<span style="color:#2e7d32;font-weight:700">Si</span>':'<span style="color:#c62828;font-weight:700">No</span>')+'</td></tr>';
+      });
+      body += '</tbody></table></div></div>';
+    }
+
+    // SOCIAL
+    if (social.facebook || social.instagram) {
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Profili Social</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
+      if (social.facebook) body += '<div style="flex:1;min-width:160px;border:1px solid #1877f2;border-radius:10px;overflow:hidden"><div style="background:#1877f2;padding:9px 14px"><span style="color:white;font-weight:700">Facebook</span></div><div style="padding:12px 14px">'+(social.facebook_follower?'<div style="font-size:1.3rem;font-weight:800;color:#1877f2;margin-bottom:5px">'+social.facebook_follower+'</div>':'')+'<a href="'+social.facebook+'" target="_blank" style="display:inline-block;padding:5px 12px;background:#1877f2;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a></div></div>';
+      if (social.instagram) body += '<div style="flex:1;min-width:160px;border:1px solid #e1306c;border-radius:10px;overflow:hidden"><div style="background:#e1306c;padding:9px 14px"><span style="color:white;font-weight:700">Instagram</span></div><div style="padding:12px 14px">'+(social.instagram_follower?'<div style="font-size:1.3rem;font-weight:800;color:#e1306c;margin-bottom:5px">'+social.instagram_follower+'</div>':'')+'<a href="'+social.instagram+'" target="_blank" style="display:inline-block;padding:5px 12px;background:#e1306c;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a></div></div>';
+      body += '</div></div>';
+    } else {
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Profili Social</div><div style="'+box+';border-left:4px solid #c62828"><div style="color:#c62828;font-weight:600;margin-bottom:4px">Nessun profilo social trovato</div></div></div>';
+    }
+
+    // VISIBILITA AI
+    body += '<div style="margin-bottom:24px"><div style="'+sec+'">Visibilita su AI (Gemini, ChatGPT)</div><div style="display:flex;gap:14px;flex-wrap:wrap">';
+    body += '<div style="'+box+';flex-shrink:0;text-align:center;min-width:110px"><div style="font-size:3rem;font-weight:800;color:'+ai.colore+'">'+ai.score+'</div><div style="font-size:8.5pt;color:'+ai.colore+';font-weight:700;margin-top:4px">'+ai.livello+'</div><div style="font-size:8pt;color:#aaa;margin-top:3px">su 100</div></div>';
+    body += '<div style="flex:1;'+box+'"><div style="font-size:9pt;color:#555;margin-bottom:10px">Le AI generative citano le attivita presenti su fonti autorevoli (Maps, TripAdvisor, sito, social, stampa). Piu fonti = piu visibilita per "'+categoria+' a '+citta+'".</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">';
+    (ai.fonti||[]).forEach(function(f){ body += '<div style="display:flex;align-items:center;gap:6px;font-size:9pt"><span style="color:'+(f.ok?'#2e7d32':'#c62828')+';font-weight:700">'+(f.ok?'&#10003;':'&#10007;')+'</span><span style="color:'+(f.ok?'#2e7d32':'#c62828')+'">'+f.label+'</span></div>'; });
+    body += '</div></div></div></div>';
+
+    // ANALISI STRATEGICA
+    if (strategia) {
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Analisi Strategica e Obiettivi</div><div style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;font-size:9.5pt;color:#1a1a1a;line-height:1.7"><p style="margin-bottom:10px">'+strategia+'</p></div></div>';
+    }
+
+    // GENERA PROPOSTA
+    var leadJson = JSON.stringify({ nome:nome, indirizzo:lead.indirizzo||'', web:web||null, telefono:lead.telefono||null, tipi:lead.tipi||[], rating:rating, nRating:nRating, descrizione:lead.descrizione||null, placeId:lead.placeId||null, categoria:categoria, citta:citta, logoUrl:lead.logoUrl||null });
+    var analisiDati = JSON.stringify({ pos_google: seo&&seo.posizione?'#'+seo.posizione:'non trovato', pos_maps: mapsPos?'#'+mapsPos:'non trovato', social_fb: social.facebook?'presente':'assente', social_ig: social.instagram?'presente':'assente', rec_perc: recensioni?recensioni.perc_risposta:0, rec_pos: recensioni?recensioni.positive:0, rec_neg: recensioni?recensioni.negative:0, competitor_sito: competitor.filter(function(c){return c.ha_sito;}).length });
+    body += '<div style="margin-top:32px;padding:20px 0;text-align:center" class="no-print">';
+    body += '<button id="btn-gen-prop" onclick="richiediProp()" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>';
+    body += '<div style="font-size:9pt;color:#aaa;margin-top:8px">Il preventivo si aggiunge qui sotto</div></div>';
+    body += '<div id="prop-container"></div>';
+
+    var css = '*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}.pg{max-width:900px;margin:24px auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)}.hdr{background:#111;padding:20px 28px;display:flex;justify-content:space-between;align-items:center}.t{font-size:13pt;font-weight:700;color:white}.s{font-size:9pt;color:rgba(255,255,255,0.5);margin-top:2px}.d{font-size:8.5pt;color:rgba(255,255,255,0.4)}.lb{border-left:5px solid #E8001C;background:white;padding:13px 22px;margin:18px 26px 0;border-radius:0 8px 8px 0;border:1px solid #eee;border-left:5px solid #E8001C}.n{font-size:12pt;font-weight:700;margin-bottom:4px}.info{font-size:9pt;color:#777;display:flex;gap:14px;flex-wrap:wrap}.bd{padding:18px 26px 26px}.az{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;padding:14px 16px;background:#f9f9f9;border-radius:8px;border:1px solid #eee}.btn{padding:9px 18px;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer}.btn:disabled{opacity:0.5}.br{background:#E8001C;color:white}.bk{background:#111;color:white}.bg{background:#2e7d32;color:white}.bgy{background:#f0f0f0;color:#555}@media print{.az,.no-print{display:none}body{background:white}.pg{box-shadow:none;margin:0}}';
+
+    var fullHtml = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Analisi - '+nome+'</title><style>'+css+'</style></head><body>' +
+      '<div class="pg"><div class="hdr"><div><div class="t">Analisi Digitale Prevendita</div><div class="s">Lead Agent - Pagine Si!</div></div><div class="d">'+oggi+'</div></div>' +
+      '<div class="lb"><div class="n">'+nome+'</div><div class="info"><span>'+(lead.indirizzo||'')+'</span>'+(web?'<span>Sito: <a href="'+web+'" target="_blank" style="color:#1565c0">'+web+'</a></span>':'<span style="color:#c62828">Nessun sito</span>')+'<span>Rating: '+(rating?rating+'/5 ('+nRating+' rec.)':'N/D')+'</span></div></div>' +
+      '<div class="bd"><div class="az">' +
+      '<button class="btn br" onclick="window.print()">Stampa / PDF</button>' +
+      '<button class="btn bg" id="ba" onclick="apriAnt()">Anteprima Sito</button>' +
+      '</div>' +
+      body +
+      '</div></div>' +
+      '<script>' +
+      'var B="https://leadagent-backend.onrender.com";' +
+      'var L='+leadJson+';' +
+      'var AD='+analisiDati+';' +
+      'function richiediProp(){' +
+      '  var btn=document.getElementById("btn-gen-prop");' +
+      '  if(btn){btn.disabled=true;btn.textContent="Generazione in corso...";}' +
+      '  var consulente=prompt("Nome del consulente:","") || "Consulente Pagine Si!";' +
+      '  var cont=document.getElementById("prop-container");' +
+      '  if(cont)cont.innerHTML="<div style=\"padding:32px;text-align:center;color:#aaa\">&#8987; Generazione proposta...</div>";' +
+      '  fetch(B+"/proposta-inline",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L,consulente:consulente,analisi:AD})})' +
+      '  .then(function(r){return r.json();})' +
+      '  .then(function(d){if(d.html&&cont){cont.innerHTML=d.html;setTimeout(function(){cont.scrollIntoView({behavior:"smooth"});},200);if(btn){btn.textContent="Proposta generata";btn.style.background="#2e7d32";}}})' +
+      '  .catch(function(e){if(cont)cont.innerHTML="";if(btn){btn.disabled=false;btn.textContent="Genera Proposta Commerciale";}});' +
+      '}' +
+      'function apriAnt(){' +
+      '  var btn=document.getElementById("ba");if(btn){btn.disabled=true;btn.textContent="Generazione...";}' +
+      '  fetch(B+"/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({nome:L.nome,indirizzo:L.indirizzo,telefono:L.telefono,tipi:L.tipi,rating:L.rating,nRating:L.nRating,descrizione:L.descrizione,logoUrl:L.logoUrl})})' +
+      '  .then(function(r){return r.json();})' +
+      '  .then(function(d){if(d.html){var w=window.open("","_blank");if(w){w.document.open();w.document.write(d.html);w.document.close();}}if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}})' +
+      '  .catch(function(e){if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}});' +
+      '}' +
+      '</script></body></html>';
+
+    res.send(fullHtml);
+  } catch(err) {
+    res.status(500).send('<html><body style="font-family:Arial;padding:2rem"><h2 style="color:#E8001C">Errore analisi</h2><p>'+err.message+'</p></body></html>');
   }
 });
 
