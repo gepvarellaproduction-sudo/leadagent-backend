@@ -472,8 +472,22 @@ app.post('/analisi', async function(req, res) {
       '</div>' +
       '<div id="cp"><div style="font-size:10pt;font-weight:600;color:#795548">Nome consulente:</div><div class="cr"><input id="ci" type="text" placeholder="Nome Cognome"><button class="btn bk" onclick="genProp()">Genera</button><button class="btn bgy" onclick="toggleCP()">Annulla</button></div></div>' +
       body +
+      '<div style="margin-top:32px;padding:20px 0;text-align:center" class="no-print">' +
+      '<button id="btn-gen-prop" onclick="richiediProp()" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>' +
+      '<div style="font-size:9pt;color:#aaa;margin-top:8px">La proposta apparira qui sotto basata sull analisi appena eseguita</div>' +
+      '</div>' +
+      '<div id="prop-container"></div>' +
       '</div></div>' +
       '<script>var B="https://leadagent-backend.onrender.com";var L='+leadJson+';' +
+      'function richiediProp(){' +
+      '  var btn=document.getElementById("btn-gen-prop");if(btn){btn.disabled=true;btn.textContent="Generazione in corso...";}' +
+      '  window.parent.postMessage({type:"richiedi-proposta"},\"*\");' +
+      '}' +
+      'window.addEventListener("message",function(e){' +
+      '  if(!e.data)return;' +
+      '  if(e.data.type==="proposta-loading"){var c=document.getElementById("prop-container");if(c)c.innerHTML="<div style=\"padding:32px;text-align:center;color:#aaa\">&#8987; Generazione proposta in corso...</div>";}' +
+      '  if(e.data.type==="proposta-ready"&&e.data.html){var c=document.getElementById("prop-container");if(c){c.innerHTML=e.data.html;var b=document.getElementById("btn-gen-prop");if(b){b.textContent="Proposta generata";b.style.background="#2e7d32";}setTimeout(function(){c.scrollIntoView({behavior:"smooth"});},200);}}' +
+      '});' +
       'function toggleCP(){var p=document.getElementById("cp");p.style.display=p.style.display==="block"?"none":"block";if(p.style.display==="block")document.getElementById("ci").focus();}' +
       'function genProp(){' +
       '  var c=document.getElementById("ci").value.trim()||"Consulente Pagine Si!";' +
@@ -492,6 +506,118 @@ app.post('/analisi', async function(req, res) {
       '  .catch(function(e){console.error(e);btn.disabled=false;btn.textContent="Anteprima Sito";});' +
       '}' +
       '</script></body></html>';
+
+    res.json({ html: html });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// Proposta inline - blocco HTML preventivo da appendere all'analisi
+app.post('/proposta-inline', async function(req, res) {
+  try {
+    var lead = req.body.lead;
+    var consulente = req.body.consulente || 'Consulente Pagine Si!';
+    if (!lead) return res.status(400).json({ error: 'Lead mancante' });
+
+    var proposalMod = require('./proposal');
+    var fatturato = proposalMod.stimaFatturato(lead);
+    var analisi = proposalMod.analisiDigitale(lead);
+    var prodotti = proposalMod.costruisciPreventivo(lead, fatturato, analisi);
+    var PRODOTTI = proposalMod.PRODOTTI;
+
+    var oggi = new Date().toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
+    var scadenza = new Date(Date.now()+30*24*60*60*1000).toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
+    var totAnno1 = prodotti.reduce(function(s,p){ return s+(p.anno1||0); }, 0);
+    var totMens = prodotti.reduce(function(s,p){ return s+(p.mens||0); }, 0);
+
+    var prodJson = JSON.stringify(prodotti);
+    var listinoJson = JSON.stringify(PRODOTTI);
+
+    var righe = prodotti.map(function(p,i){
+      return '<tr id="pr-'+i+'" data-a1="'+(p.anno1||0)+'" data-mn="'+(p.mens||0)+'" style="border-bottom:1px solid #f0f0f0">' +
+        '<td style="padding:9px 11px;font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600">'+p.sigla+'</td>' +
+        '<td style="padding:9px 11px"><div style="font-weight:600;margin-bottom:2px" contenteditable="true">'+p.nome+'</div><div style="font-size:8.5pt;color:#777" contenteditable="true">'+p.desc+'</div><div style="font-size:8pt;color:#aaa;font-style:italic" contenteditable="true">'+p.motivazione+'</div></td>' +
+        '<td style="padding:9px 11px"><span style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt">'+p.cat+'</span></td>' +
+        '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.anno1?'&euro; '+p.anno1.toLocaleString('it-IT'):'&mdash;')+'</td>' +
+        '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td>' +
+        '<td style="padding:9px 11px;text-align:center;width:30px"><button onclick="rimuoviPr('+i+')" style="background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:3px 6px" class="no-print">&#10005;</button></td>' +
+        '</tr>';
+    }).join('');
+
+    var html = '<div id="proposta-inline-wrap" style="margin-top:32px">' +
+      '<hr style="border:none;border-top:3px solid #E8001C;margin-bottom:24px">' +
+      '<div style="font-size:10.5pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;padding-bottom:6px;border-bottom:2px solid #E8001C">Proposta Commerciale</div>' +
+      '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:6px;font-size:9pt;color:#aaa">' +
+      '<span>Consulente: <strong style="color:#1a1a1a">'+consulente+'</strong></span>' +
+      '<span>Data: '+oggi+'</span><span>Valida fino al: '+scadenza+'</span></div>' +
+      '<div style="background:#fff9e6;border:1px solid #ffe082;border-radius:7px;padding:9px 14px;margin-bottom:14px;font-size:9.5pt;color:#795548" class="no-print">&#9999;&#65039; Clicca sui testi per modificarli &middot; &#10005; per rimuovere righe</div>' +
+      '<table id="pr-tbl" style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
+      '<thead><tr style="background:#111;color:white"><th style="padding:9px 11px;text-align:left;font-size:8.5pt;font-weight:500">Sigla</th><th style="padding:9px 11px;text-align:left;font-size:8.5pt;font-weight:500">Prodotto</th><th style="padding:9px 11px;text-align:left;font-size:8.5pt;font-weight:500">Area</th><th style="padding:9px 11px;text-align:right;font-size:8.5pt;font-weight:500">Anno 1</th><th style="padding:9px 11px;text-align:right;font-size:8.5pt;font-weight:500">Mensile</th><th class="no-print" style="width:30px"></th></tr></thead>' +
+      '<tbody>'+righe+'</tbody>' +
+      '<tfoot class="no-print"><tr><td colspan="6" style="padding:8px 11px;border-top:2px dashed #f0f0f0;background:#fafafa">' +
+      '<button onclick="apriListino()" style="padding:5px 12px;background:#fff;border:1.5px dashed #E8001C;color:#E8001C;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer">&#65291; Aggiungi dal listino</button>' +
+      '</td></tr></tfoot></table>' +
+      '<div style="background:#111;color:white;border-radius:8px;padding:18px 22px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:16px">' +
+      '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Investimento Anno 1</div><div style="font-size:18pt;font-weight:800;color:#E8001C" id="pr-tot1">&euro; '+totAnno1.toLocaleString('it-IT')+'</div><div style="font-size:8pt;color:rgba(255,255,255,0.3)">IVA esclusa</div></div>' +
+      '<div style="width:1px;height:40px;background:rgba(255,255,255,0.1)"></div>' +
+      '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Canone Mensile</div><div style="font-size:18pt;font-weight:800;color:#E8001C" id="pr-totm">&euro; '+totMens+'<span style="font-size:11pt;color:rgba(255,255,255,0.4)">/mese</span></div></div>' +
+      '<div style="width:1px;height:40px;background:rgba(255,255,255,0.1)"></div>' +
+      '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Soluzioni</div><div style="font-size:18pt;font-weight:800" id="pr-num">'+prodotti.length+'</div></div>' +
+      '</div>' +
+      '<div style="font-size:8.5pt;color:#bbb;text-align:center">Pagine Si! SpA &middot; paginesispa.it &middot; Prezzi IVA esclusa</div>' +
+      '</div>' +
+      '<div id="listino-overlay" onclick="if(event.target===this)chiudiListino()" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:9999;align-items:center;justify-content:center">' +
+      '<div style="background:#fff;border-radius:14px;width:660px;max-width:95vw;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.2)">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between"><div style="font-size:13px;font-weight:700">Aggiungi servizio</div><button onclick="chiudiListino()" style="width:26px;height:26px;border-radius:50%;border:none;background:#f0f0f0;cursor:pointer">&#10005;</button></div>' +
+      '<div id="listino-body" style="overflow-y:auto;padding:16px 18px;flex:1"></div>' +
+      '<div style="padding:10px 18px;border-top:1px solid #eee;background:#f9f9f9;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#aaa">Seleziona un servizio</span><button id="btn-add-ok" onclick="aggiungiDaListino()" disabled style="padding:7px 16px;background:#E8001C;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;opacity:0.4">Aggiungi</button></div>' +
+      '</div></div>' +
+      '<script>' +
+      'var chr_tr="tr";var _LISTINO='+listinoJson+';var _selSigla=null;' +
+      'function rimuoviPr(i){var r=document.getElementById("pr-"+i);if(r){r.remove();aggiornaTot();}}' +
+      'function aggiornaTot(){var a=0,m=0,n=0;document.querySelectorAll("#pr-tbl tbody tr").forEach(function(t){a+=parseFloat(t.dataset.a1||0);m+=parseFloat(t.dataset.mn||0);n++;});document.getElementById("pr-tot1").innerHTML="&euro; "+a.toLocaleString("it-IT");document.getElementById("pr-totm").innerHTML="&euro; "+m+"/mese";document.getElementById("pr-num").textContent=n;}' +
+      'function apriListino(){' +
+      '  var cats={"Sito Web":["Si2A-PM","Si2RE-PM","Si2S-PM"],"Directory":["WDSAL","WDSA"],"Google Maps":["GBP","GBPP","GBPAdv"],"Reputazione":["ISTQQ","ISTBS","ISTPS"],"Social":["SOC-SET","SOC-BAS","SOC-START","SOC-WEEK","SOC-FULL"],"SEO":["SIN","SMN","BLS10P"],"Google Ads":["ADW-E","ADW-S","SIADVLS","SIADVLG"],"Video":["VS1","VS4","VST30","VP"],"AI":["AI-ADLSET","AI-ADLABB"],"eCommerce":["EC-SMART","EC-GLOB"],"Automation":["Si4BLD","Si4BEN"]};' +
+      '  var h="";' +
+      '  for(var cat in cats){' +
+      '    h+="<div style=\"margin-bottom:14px\"><div style=\"font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;margin-bottom:6px\">"+cat+"</div><div style=\"display:flex;flex-wrap:wrap;gap:4px\">";' +
+      '    cats[cat].forEach(function(s){' +
+      '      var p=_LISTINO[s];if(!p)return;' +
+      '      var pr=p.mens?("&euro;"+p.mens+"/mese"):(p.anno1?("&euro;"+p.anno1+"/anno"):"");' +
+      '      var btn=document.createElement("button");' +
+      '      btn.id="lc-"+s;btn.dataset.sigla=s;' +
+      '      btn.onclick=function(){selS(this,this.dataset.sigla);};' +
+      '      btn.style.cssText="padding:3px 9px;border-radius:12px;border:1.5px solid #e0e0e0;background:#fff;cursor:pointer;font-size:10px;color:#555;margin:2px";' +
+      '      btn.innerHTML="<b style=\"font-family:monospace;color:#E8001C\">"+s+"</b> "+p.nome+" <span style=\"opacity:0.5;font-size:9px\">"+pr+"</span>";' +
+      '      h+=btn.outerHTML;' +
+      '    });' +
+      '    h+="</div></div>";' +
+      '  }' +
+      '  document.getElementById("listino-body").innerHTML=h;' +
+      '  document.getElementById("listino-overlay").style.display="flex";' +
+      '}' +
+'function selS(el,s){document.querySelectorAll("[id^=lc-]").forEach(function(e){e.style.background="#fff";e.style.borderColor="#e0e0e0";e.style.color="#555";});_selSigla=s;el.style.background="#E8001C";el.style.borderColor="#E8001C";el.style.color="#fff";var b=document.getElementById("btn-add-ok");if(b){b.disabled=false;b.style.opacity="1";}}' +
+      'function aggiungiDaListino(){' +
+      '  if(!_selSigla)return;' +
+      '  var p=_LISTINO[_selSigla];if(!p)return;' +
+      '  var tb=document.querySelector("#pr-tbl tbody");' +
+      '  var id="ex"+Date.now();' +
+      '  var tr=document.createElement("tr");' +
+      '  tr.id="pr-"+id;tr.dataset.a1=p.anno1||0;tr.dataset.mn=p.mens||0;' +
+      '  tr.style.borderBottom="1px solid #f0f0f0";' +
+      '  tr.innerHTML=' +
+      '    "<td style=\"padding:9px 11px;font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600\">"+_selSigla+"</td>" +' +
+      '    "<td style=\"padding:9px 11px\"><div contenteditable=\"true\" style=\"font-weight:600;margin-bottom:2px\">"+p.nome+"</div><div contenteditable=\"true\" style=\"font-size:8.5pt;color:#777\">"+p.desc+"</div></td>" +' +
+      '    "<td style=\"padding:9px 11px\"><span style=\"background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt\">"+p.cat+"</span></td>" +' +
+      '    "<td style=\"padding:9px 11px;text-align:right;font-weight:600\">"+(p.anno1?"&euro; "+p.anno1.toLocaleString("it-IT"):"&mdash;")+"</td>" +' +
+      '    "<td style=\"padding:9px 11px;text-align:right;font-weight:600\">"+(p.mens?"&euro; "+p.mens+"/mese":"&mdash;")+"</td>" +' +
+      '    "<td style=\"padding:9px 11px;text-align:center\"><button onclick=\"this.closest(String.fromCharCode(39)+chr_tr+String.fromCharCode(39)).remove();aggiornaTot()\" style=\"background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:3px 6px\">&#10005;</button></td>";' +
+      '  tb.appendChild(tr);aggiornaTot();chiudiListino();_selSigla=null;' +
+      '}' +
+'function chiudiListino(){document.getElementById("listino-overlay").style.display="none";}' +
+      '</script>';
 
     res.json({ html: html });
   } catch(err) {
