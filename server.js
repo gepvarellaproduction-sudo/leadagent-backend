@@ -82,22 +82,28 @@ app.post('/preview', async function(req, res) {
 
 // Cerca profili social reali via Google
 async function cercaSocial(nome, citta) {
-  var out = { facebook: null, instagram: null };
+  var out = { facebook: null, facebook_snippet: null, instagram: null, instagram_snippet: null };
   try {
     var items = await dfsSearch('"' + nome + '" ' + citta + ' facebook OR instagram', 10);
     items.forEach(function(item) {
       var url = (item.url || '').toLowerCase();
       var dom = (item.domain || '').toLowerCase();
+      // Estrai info utili dallo snippet Google
+      var snippet = item.description || item.snippet || '';
       if (!out.facebook && dom.includes('facebook.com')) {
         var path = url.replace(/https?:\/\/(www\.)?facebook\.com\/?/,'');
         if (path && path.length > 2 && !path.startsWith('search') && !path.startsWith('watch') && !path.startsWith('groups')) {
           out.facebook = item.url;
+          out.facebook_snippet = snippet || null;
+          out.facebook_title = item.title || null;
         }
       }
       if (!out.instagram && dom.includes('instagram.com')) {
         var path2 = url.replace(/https?:\/\/(www\.)?instagram\.com\/?/,'');
         if (path2 && path2.length > 2 && !path2.startsWith('explore') && !path2.startsWith('p/')) {
           out.instagram = item.url;
+          out.instagram_snippet = snippet || null;
+          out.instagram_title = item.title || null;
         }
       }
     });
@@ -151,41 +157,40 @@ async function cercaCompetitor(categoria, citta, nomeLeadNorm, webLeadNorm, serp
       }
     }
 
-    // Competitor: escludi il lead
-    risultato.competitor = data.places
-      .filter(function(p) {
-        var n = ((p.displayName && p.displayName.text)||'').toLowerCase().trim();
-        return n && !n.includes(nomeLeadNorm.slice(0,5)) && !(webLeadNorm && (p.websiteUri||'').toLowerCase().includes(webLeadNorm));
-      })
-      .slice(0, 3)
-      .map(function(p, idx) {
-        var sito = p.websiteUri || null;
+    // Competitor: escludi il lead, mantieni posizione reale nella lista Maps originale
+    var competitorList = [];
+    for (var ci = 0; ci < data.places.length; ci++) {
+      var cp = data.places[ci];
+      var cn = ((cp.displayName && cp.displayName.text)||'').toLowerCase().trim();
+      var isLead = cn.includes(nomeLeadNorm.slice(0,5)) || (webLeadNorm && (cp.websiteUri||'').toLowerCase().includes(webLeadNorm));
+      if (!isLead && cn) {
+        var sito = cp.websiteUri || null;
         var sitoDom = sito ? sito.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
-
-        // Posizione SERP competitor - solo se non e una directory
         var posizioneSerp = null;
         if (sitoDom && serpItems && serpItems.length && !directory.some(function(d){ return sitoDom.includes(d); })) {
-          for (var i = 0; i < serpItems.length; i++) {
-            var serpDom = (serpItems[i].domain||'').toLowerCase();
+          for (var si = 0; si < serpItems.length; si++) {
+            var serpDom = (serpItems[si].domain||'').toLowerCase();
             if (!directory.some(function(d){ return serpDom.includes(d); }) && serpDom.includes(sitoDom)) {
-              posizioneSerp = i + 1;
+              posizioneSerp = si + 1;
               break;
             }
           }
         }
-
-        return {
-          nome: (p.displayName && p.displayName.text) || 'N/D',
-          posizione_maps: idx + 1,
+        competitorList.push({
+          nome: (cp.displayName && cp.displayName.text) || 'N/D',
+          posizione_maps: ci + 1,
           posizione_serp: posizioneSerp,
-          rating: p.rating ? p.rating.toFixed(1) : null,
-          n_recensioni: p.userRatingCount || 0,
+          rating: cp.rating ? cp.rating.toFixed(1) : null,
+          n_recensioni: cp.userRatingCount || 0,
           ha_sito: !!sito,
           sito: sito,
           sito_dom: sitoDom
-        };
-      });
-  } catch(e) {}
+        });
+        if (competitorList.length >= 3) break;
+      }
+    }
+    risultato.competitor = competitorList;
+      } catch(e) {}
   return risultato;
 }
 
@@ -357,23 +362,48 @@ app.post('/analisi', async function(req, res) {
 
     // 4. Profili social dettaglio
     body += '<div style="margin-bottom:28px">';
-    body += '<div style="' + secStyle + '">Profili Social Rilevati</div>';
-    body += '<div style="' + boxStyle + '">';
+    body += '<div style="' + secStyle + '">Profili Social</div>';
     if (!social.facebook && !social.instagram) {
+      body += '<div style="' + boxStyle + ';border-left:4px solid #c62828">';
       body += '<div style="color:#c62828;font-weight:600;margin-bottom:6px">Nessun profilo social trovato tramite ricerca Google</div>';
       body += '<div style="font-size:9pt;color:#888">Opportunita: apertura e gestione profili FB+IG da zero</div>';
+      body += '</div>';
     } else {
-      body += '<div style="font-size:9pt;color:#555;margin-bottom:12px">Profili trovati tramite ricerca Google - verifica manualmente l\'attivita sui profili:</div>';
+      body += '<div style="display:flex;gap:14px;flex-wrap:wrap">';
       if (social.facebook) {
-        body += '<div style="margin-bottom:10px"><a href="' + social.facebook + '" target="_blank" style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:#1877f2;color:white;border-radius:8px;font-size:10pt;font-weight:600;text-decoration:none">Apri profilo Facebook</a>';
-        body += '<div style="font-size:8.5pt;color:#aaa;margin-top:4px">' + social.facebook + '</div></div>';
+        body += '<div style="flex:1;min-width:220px;border:1px solid #1877f2;border-radius:10px;overflow:hidden">';
+        body += '<div style="background:#1877f2;padding:10px 14px;display:flex;align-items:center;gap:8px">';
+        body += '<span style="color:white;font-weight:700;font-size:10pt">Facebook</span></div>';
+        body += '<div style="padding:12px 14px">';
+        if (social.facebook_title) {
+          body += '<div style="font-size:9pt;font-weight:600;color:#1a1a1a;margin-bottom:4px">' + social.facebook_title.replace(/[<>]/g,'') + '</div>';
+        }
+        if (social.facebook_snippet) {
+          body += '<div style="font-size:8.5pt;color:#555;margin-bottom:8px;line-height:1.5">' + social.facebook_snippet.replace(/[<>]/g,'').slice(0,200) + '</div>';
+        }
+        body += '<div style="font-size:8pt;color:#aaa;margin-bottom:8px;word-break:break-all">' + social.facebook + '</div>';
+        body += '<a href="' + social.facebook + '" target="_blank" style="display:inline-block;padding:6px 14px;background:#1877f2;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a>';
+        body += '</div></div>';
       }
       if (social.instagram) {
-        body += '<div style="margin-bottom:10px"><a href="' + social.instagram + '" target="_blank" style="display:inline-flex;align-items:center;gap:8px;padding:10px 20px;background:#e1306c;color:white;border-radius:8px;font-size:10pt;font-weight:600;text-decoration:none">Apri profilo Instagram</a>';
-        body += '<div style="font-size:8.5pt;color:#aaa;margin-top:4px">' + social.instagram + '</div></div>';
+        body += '<div style="flex:1;min-width:220px;border:1px solid #e1306c;border-radius:10px;overflow:hidden">';
+        body += '<div style="background:#e1306c;padding:10px 14px;display:flex;align-items:center;gap:8px">';
+        body += '<span style="color:white;font-weight:700;font-size:10pt">Instagram</span></div>';
+        body += '<div style="padding:12px 14px">';
+        if (social.instagram_title) {
+          body += '<div style="font-size:9pt;font-weight:600;color:#1a1a1a;margin-bottom:4px">' + social.instagram_title.replace(/[<>]/g,'') + '</div>';
+        }
+        if (social.instagram_snippet) {
+          body += '<div style="font-size:8.5pt;color:#555;margin-bottom:8px;line-height:1.5">' + social.instagram_snippet.replace(/[<>]/g,'').slice(0,200) + '</div>';
+        }
+        body += '<div style="font-size:8pt;color:#aaa;margin-bottom:8px;word-break:break-all">' + social.instagram + '</div>';
+        body += '<a href="' + social.instagram + '" target="_blank" style="display:inline-block;padding:6px 14px;background:#e1306c;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a>';
+        body += '</div></div>';
       }
+      body += '</div>';
+      body += '<div style="font-size:8.5pt;color:#aaa;margin-top:10px">Dati estratti da Google - verifica manualmente i profili per valutare attivita e contenuti recenti</div>';
     }
-    body += '</div></div>';
+    body += '</div>';
 
     // HTML pagina completa
     var oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
