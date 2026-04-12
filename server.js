@@ -909,6 +909,256 @@ app.post('/analisi-html', async function(req, res) {
   }
 });
 
+
+// Loading page - risponde subito con spinner, poi carica analisi in background
+app.post('/analisi-loading', async function(req, res) {
+  try {
+    var lead = typeof req.body.lead === 'string' ? JSON.parse(req.body.lead) : req.body.lead;
+    if (!lead) return res.status(400).send('<html><body>Lead mancante</body></html>');
+    var leadJson = JSON.stringify(lead).replace(/</g,'\u003c').replace(/>/g,'\u003e');
+    var nome = lead.nome || 'Attivita';
+
+    var loadingHtml = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Analisi - '+nome+'</title>' +
+      '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}' +
+      '#loading{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;background:#f4f4f4}' +
+      '.spinner{width:48px;height:48px;border:4px solid #eee;border-top-color:#E8001C;border-radius:50%;animation:spin 1s linear infinite;margin-bottom:24px}' +
+      '@keyframes spin{to{transform:rotate(360deg)}}' +
+      '.bar-wrap{width:300px;height:4px;background:#e0e0e0;border-radius:2px;overflow:hidden;margin-top:20px}' +
+      '.bar{height:4px;background:#E8001C;width:0;border-radius:2px;transition:width 40s linear}' +
+      '#result{display:none}' +
+      '</style></head><body>' +
+      '<div id="loading"><div class="spinner"></div>' +
+      '<div style="font-size:14pt;font-weight:700;color:#E8001C;margin-bottom:8px">Analisi in corso</div>' +
+      '<div style="font-size:10pt;color:#777;margin-bottom:4px">Raccolta dati reali da Google e AI</div>' +
+      '<div style="font-size:9pt;color:#aaa">20-40 secondi...</div>' +
+      '<div class="bar-wrap"><div class="bar" id="bar"></div></div></div>' +
+      '<div id="result"></div>' +
+      '<script>' +
+      'var L='+leadJson+';' +
+      'var B="https://leadagent-backend.onrender.com";' +
+      'setTimeout(function(){document.getElementById("bar").style.width="90%";},300);' +
+      'fetch(B+"/analisi-compute",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L})})' +
+      '.then(function(r){return r.json();})' +
+      '.then(function(d){' +
+      '  document.getElementById("loading").style.display="none";' +
+      '  document.getElementById("result").style.display="block";' +
+      '  document.getElementById("result").innerHTML=d.html;' +
+      '  document.title="Analisi - "+L.nome;' +
+      '})' +
+      '.catch(function(e){' +
+      '  document.getElementById("loading").innerHTML="<div style=\"color:#E8001C;font-size:14pt;font-weight:700\">Errore analisi</div><div style=\"margin-top:8px;color:#777\">"+e.message+"</div>";' +
+      '});' +
+      '</script></body></html>';
+
+    res.send(loadingHtml);
+  } catch(err) {
+    res.status(500).send('<html><body>Errore: '+err.message+'</body></html>');
+  }
+});
+
+
+// Compute analisi - fa tutto il lavoro, restituisce JSON {html}
+app.post('/analisi-compute', async function(req, res) {
+  try {
+    var lead = req.body.lead;
+    if (!lead) return res.status(400).json({ error: 'Lead mancante' });
+
+    var nome = lead.nome || '';
+    var categoria = lead.categoria || '';
+    var citta = lead.citta || '';
+    var web = (lead.web && lead.web !== 'N/D') ? lead.web : null;
+    var nRating = lead.nRating || 0;
+    var rating = lead.rating || null;
+    var nomeNorm = nome.toLowerCase().trim();
+    var webNorm = web ? web.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
+
+    // 1. Task recensioni
+    var recTaskId = null;
+    try {
+      var payload = [{ depth: 50, sort_by: 'newest', location_code: 2380, language_code: 'it' }];
+      if (lead.placeId) { payload[0].place_id = lead.placeId; } else { payload[0].keyword = nome + ' ' + citta; }
+      var pr = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_post', { method:'POST', headers:{'Authorization':dfsAuth(),'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+      var pd = await pr.json();
+      recTaskId = pd.tasks && pd.tasks[0] && pd.tasks[0].id;
+    } catch(e) {}
+
+    // 2. Ricerche parallele
+    var ris = await Promise.all([ cercaPosizioneGoogle(nome, web, categoria, citta), cercaSocial(nome, citta) ]);
+    var seo = ris[0], social = ris[1], serpItems = (seo&&seo.items)||[];
+    var keyword = (seo&&seo.keyword)||(categoria+' '+citta);
+    var mapsData = await cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems);
+    var competitor = mapsData.competitor, mapsPos = mapsData.posizione_maps_lead;
+
+    // 3. Recensioni
+    var recensioni = null;
+    if (recTaskId) {
+      for (var a=0; a<8; a++) {
+        await new Promise(function(r){ setTimeout(r,2000); });
+        try {
+          var gr = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_get/'+recTaskId, { headers:{'Authorization':dfsAuth()} });
+          var gd = await gr.json();
+          var tk = gd.tasks&&gd.tasks[0];
+          if (tk&&tk.status_code===20000&&tk.result&&tk.result[0]) {
+            var res0=tk.result[0], its=res0.items||[];
+            var risp=its.filter(function(r){return !!r.owner_answer;}).length;
+            recensioni={ totale_recensioni:nRating||res0.reviews_count||its.length, campione:its.length, con_risposta:risp, perc_risposta:its.length>0?Math.round((risp/its.length)*100):0, positive:its.filter(function(r){return r.rating&&r.rating.value>=4;}).length, negative:its.filter(function(r){return r.rating&&r.rating.value<=2;}).length, testi:its.slice(0,20).map(function(r){return{rating:r.rating&&r.rating.value,testo:r.review_text||'',ha_risposta:!!r.owner_answer,time_ago:r.time_ago||''};}), ultima:its[0]?{rating:its[0].rating&&its[0].rating.value,testo:its[0].review_text||'',ha_risposta:!!its[0].owner_answer,time_ago:its[0].time_ago||''}:null };
+            break;
+          }
+        } catch(e) {}
+      }
+    }
+
+    // 4. Visibilita AI
+    var ai = await calcolaAI(nome, citta, web, social, nRating, rating, seo);
+
+    // 5. Claude
+    var strategia = null;
+    try {
+      var recT = recensioni&&recensioni.testi?recensioni.testi.slice(0,8).map(function(r){return(r.rating||'?')+'/5: '+r.testo.slice(0,70);}).join(' | '):'nessuna';
+      var datiStr = 'Attivita: '+nome+' ('+categoria+' '+citta+'). Sito: '+(web||'assente')+'. Rating: '+(rating||'N/D')+'/5 ('+nRating+' rec). Google: '+(seo&&seo.posizione?'#'+seo.posizione:'N/T')+'. Maps: '+(mapsPos?'#'+mapsPos:'N/T')+'. FB:'+(social.facebook?'si':'no')+' IG:'+(social.instagram?'si':'no')+'. Risp rec:'+(recensioni?recensioni.perc_risposta+'%':'N/D')+' pos:'+( recensioni?recensioni.positive:0)+' neg:'+(recensioni?recensioni.negative:0)+'. Rec: '+recT+'. Competitor: '+competitor.map(function(c){return c.nome+' Maps#'+c.posizione_maps+' '+(c.rating||'?')+'/5';}).join(', ');
+      var prompt = 'Sei un digital marketing strategist per PMI italiane. Dati: '+datiStr+'. Scrivi max 300 parole con **Titolo** per: **Situazione Attuale** **Analisi Recensioni** **Obiettivi 90gg** **Obiettivi 6 mesi** **Strategia Social** **Priorita Intervento**';
+      var aiR = await fetch('https://api.anthropic.com/v1/messages', { method:'POST', headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01'}, body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:600,messages:[{role:'user',content:prompt}]}) });
+      var aiD = await aiR.json();
+      if (aiD.content&&aiD.content[0]&&aiD.content[0].text) {
+        strategia = aiD.content[0].text.split('**').map(function(t,i){return i%2===1?'<strong>'+t+'</strong>':t;}).join('').split('\n\n').join('</p><p style="margin-bottom:10px">').split('\n').join('<br>');
+      }
+    } catch(e) {}
+
+    // 6. Proposta automatica
+    var proposalHtml = '';
+    try {
+      var pMod = require('./proposal');
+      var fatturato = pMod.stimaFatturato(lead);
+      var analisiBase = pMod.analisiDigitale(lead);
+      if (!seo||!seo.posizione||seo.posizione>30) analisiBase.bisogni = analisiBase.bisogni||{};
+      var prodotti = pMod.costruisciPreventivo(lead, fatturato, analisiBase);
+      var PRODOTTI = pMod.PRODOTTI;
+      var oggi2 = new Date().toLocaleDateString('it-IT',{day:'2-digit',month:'long',year:'numeric'});
+      var scad = new Date(Date.now()+30*24*60*60*1000).toLocaleDateString('it-IT',{day:'2-digit',month:'long',year:'numeric'});
+      var tot1 = prodotti.reduce(function(s,p){return s+(p.anno1||0);},0);
+      var totM = prodotti.reduce(function(s,p){return s+(p.mens||0);},0);
+      var righe = prodotti.map(function(p,i){
+        return '<tr style="border-bottom:1px solid #f0f0f0">' +
+          '<td style="padding:8px 10px;font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600">'+p.sigla+'</td>' +
+          '<td style="padding:8px 10px"><div style="font-weight:600;margin-bottom:2px" contenteditable="true">'+p.nome+'</div><div style="font-size:8.5pt;color:#777" contenteditable="true">'+p.desc+'</div></td>' +
+          '<td style="padding:8px 10px"><span style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt">'+p.cat+'</span></td>' +
+          '<td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">'+(p.anno1?'&euro; '+p.anno1.toLocaleString('it-IT'):'&mdash;')+'</td>' +
+          '<td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td>' +
+          '</tr>';
+      }).join('');
+      proposalHtml = '<hr style="border:none;border-top:3px solid #E8001C;margin:32px 0 24px">' +
+        '<div style="font-size:10.5pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px;padding-bottom:6px;border-bottom:2px solid #E8001C">Proposta Commerciale</div>' +
+        '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px;font-size:9pt;color:#aaa">' +
+        '<span>Data: '+oggi2+'</span><span>Valida fino al: '+scad+'</span>' +
+        '<span>Consulente: <strong style="color:#1a1a1a" id="consulente-nome" contenteditable="true">Consulente Pagine Si!</strong></span></div>' +
+        '<div style="background:#fff9e6;border:1px solid #ffe082;border-radius:7px;padding:9px 14px;margin-bottom:14px;font-size:9.5pt;color:#795548" class="no-print">Clicca sui testi per modificarli</div>' +
+        '<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
+        '<thead><tr style="background:#111;color:white"><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Sigla</th><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Prodotto</th><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Area</th><th style="padding:8px 10px;text-align:right;font-size:8.5pt">Anno 1</th><th style="padding:8px 10px;text-align:right;font-size:8.5pt">Mensile</th></tr></thead>' +
+        '<tbody>'+righe+'</tbody></table>' +
+        '<div style="background:#111;color:white;border-radius:8px;padding:16px 22px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:16px">' +
+        '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Investimento Anno 1</div><div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; '+tot1.toLocaleString('it-IT')+'</div><div style="font-size:8pt;color:rgba(255,255,255,0.3)">IVA esclusa</div></div>' +
+        '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Canone Mensile</div><div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; '+totM+'<span style="font-size:11pt;color:rgba(255,255,255,0.4)">/mese</span></div></div>' +
+        '</div>' +
+        '<div style="font-size:8.5pt;color:#bbb;text-align:center">Pagine Si! SpA &middot; paginesispa.it &middot; Prezzi IVA esclusa</div>';
+    } catch(e) {}
+
+    // Build HTML
+    var sec = 'font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C';
+    var box = 'background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px 18px;margin-bottom:8px';
+    var oggi = new Date().toLocaleDateString('it-IT',{day:'2-digit',month:'long',year:'numeric'});
+    var body = '';
+
+    var gPos=seo&&seo.posizione, gColor=gPos?(gPos<=10?'#2e7d32':gPos<=30?'#e65100':'#c62828'):'#c62828';
+    var mColor=mapsPos?(mapsPos<=3?'#2e7d32':mapsPos<=7?'#e65100':'#c62828'):'#9e9e9e';
+    body += '<div style="margin-bottom:24px"><div style="'+sec+'">Posizionamento - '+keyword+'</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
+    body += '<div style="flex:1;min-width:120px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Google Organico</div><div style="font-size:2.6rem;font-weight:800;color:'+gColor+'">'+(gPos?'#'+gPos:(seo&&seo.no_sito?'N/sito':'N/T'))+'</div><div style="font-size:8.5pt;color:'+gColor+';font-weight:600;margin-top:4px">'+(gPos?(gPos<=10?'Prima pagina':gPos<=30?'Pagine 2-3':'Oltre pag.3'):(seo&&seo.no_sito?'Senza sito':'Non trovato'))+'</div></div>';
+    body += '<div style="flex:1;min-width:120px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Google Maps</div><div style="font-size:2.6rem;font-weight:800;color:'+mColor+'">'+(mapsPos?'#'+mapsPos:'N/T')+'</div><div style="font-size:8.5pt;color:'+mColor+';font-weight:600;margin-top:4px">'+(mapsPos?(mapsPos<=3?'Top 3':'Pos. '+mapsPos):'Non trovato')+'</div></div>';
+    body += '</div></div>';
+
+    body += '<div style="margin-bottom:24px"><div style="'+sec+'">Presenza Digitale</div><div style="display:flex;gap:10px;flex-wrap:wrap">';
+    [{label:'Sito Web',val:web?'Presente':'Assente',ok:!!web,link:web},{label:'Maps',val:nRating>0?nRating+' rec.':'Assente',ok:nRating>=20},{label:'Rating',val:rating?rating+'/5':'N/D',ok:rating>=4.0},{label:'Facebook',val:social.facebook?(social.facebook_follower||'Trovato'):'Assente',ok:!!social.facebook,link:social.facebook},{label:'Instagram',val:social.instagram?(social.instagram_follower||'Trovato'):'Assente',ok:!!social.instagram,link:social.instagram}].forEach(function(item){
+      var bg=item.ok?'#e8f5e9':'#fce8e8',col=item.ok?'#2e7d32':'#c62828';
+      body += '<div style="flex:1;min-width:90px;background:'+bg+';border-radius:8px;padding:10px;text-align:center"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:4px">'+item.label+'</div>'+(item.link?'<a href="'+item.link+'" target="_blank" style="font-size:9pt;font-weight:700;color:'+col+';text-decoration:none">'+item.val+'</a>':'<div style="font-size:9pt;font-weight:700;color:'+col+'">'+item.val+'</div>')+'</div>';
+    });
+    body += '</div></div>';
+
+    if (recensioni) {
+      var pColor=recensioni.perc_risposta>=70?'#2e7d32':recensioni.perc_risposta>=30?'#e65100':'#c62828';
+      var pLabel=recensioni.perc_risposta>=70?'Buona gestione':recensioni.perc_risposta>=30?'Parziale':'Scarsa';
+      var stars5=['&#9733;&#9733;&#9733;&#9733;&#9733;','&#9733;&#9733;&#9733;&#9733;&#9734;','&#9733;&#9733;&#9733;&#9734;&#9734;','&#9733;&#9733;&#9734;&#9734;&#9734;','&#9733;&#9734;&#9734;&#9734;&#9734;'];
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Gestione Recensioni</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+      body += '<div style="flex:1;min-width:90px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">Totale</div><div style="font-size:2rem;font-weight:800">'+recensioni.totale_recensioni+'</div></div>';
+      body += '<div style="flex:1;min-width:90px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">% Risposte</div><div style="font-size:2rem;font-weight:800;color:'+pColor+'">'+recensioni.perc_risposta+'%</div><div style="font-size:8pt;color:'+pColor+';font-weight:600">'+pLabel+'</div></div>';
+      body += '<div style="flex:1;min-width:90px;'+box+';text-align:center"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:5px">Pos/Neg</div><div style="font-size:1.6rem;font-weight:800"><span style="color:#2e7d32">'+recensioni.positive+'</span> / <span style="color:#c62828">'+recensioni.negative+'</span></div><div style="font-size:8pt;color:#aaa">su '+recensioni.campione+' anal.</div></div>';
+      body += '</div>';
+      if (recensioni.ultima&&recensioni.ultima.testo) {
+        var ur=recensioni.ultima,sC=ur.rating>=4?'#2e7d32':ur.rating>=3?'#e65100':'#c62828';
+        body += '<div style="'+box+'"><div style="font-size:8.5pt;color:#aaa;text-transform:uppercase;margin-bottom:6px">Ultima'+(ur.time_ago?' ('+ur.time_ago+')':'')+'</div>';
+        if (ur.rating) body += '<div style="font-size:10pt;color:'+sC+';margin-bottom:5px">'+stars5[Math.max(0,5-Math.round(ur.rating))]+'</div>';
+        body += '<div style="font-size:9.5pt;color:#555;line-height:1.5;font-style:italic">&quot;'+ur.testo.slice(0,280).replace(/[<>]/g,'')+(ur.testo.length>280?'...':'')+'&quot;</div>';
+        body += '<div style="font-size:8.5pt;margin-top:6px;font-weight:600;color:'+(ur.ha_risposta?'#2e7d32':'#c62828')+'">'+(ur.ha_risposta?'Proprietario ha risposto':'Nessuna risposta')+'</div></div>';
+      }
+      body += '</div>';
+    }
+
+    if (competitor&&competitor.length) {
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Competitor di Zona</div><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:9.5pt"><thead><tr style="background:#111;color:white"><th style="padding:8px 10px;text-align:left">Attivita</th><th style="padding:8px 10px;text-align:center">Maps</th><th style="padding:8px 10px;text-align:center">Google</th><th style="padding:8px 10px;text-align:center">Rating</th><th style="padding:8px 10px;text-align:center">Rec.</th><th style="padding:8px 10px;text-align:center">% Risp.</th><th style="padding:8px 10px;text-align:center">Sito</th></tr></thead><tbody>';
+      competitor.forEach(function(c,i){
+        body += '<tr style="background:'+(i%2===0?'white':'#fafafa')+';border-bottom:1px solid #f0f0f0"><td style="padding:8px 10px;font-weight:600">'+c.nome+(c.sito_dom?'<br><span style="font-size:8pt;color:#1565c0">'+c.sito_dom+'</span>':'')+'</td><td style="padding:8px 10px;text-align:center"><span style="background:#e8f5e9;color:#2e7d32;padding:2px 7px;border-radius:4px;font-weight:700">#'+c.posizione_maps+'</span></td><td style="padding:8px 10px;text-align:center">'+(c.posizione_serp?'<span style="background:#e8f5e9;color:#2e7d32;padding:2px 7px;border-radius:4px;font-weight:700">#'+c.posizione_serp+'</span>':'<span style="color:#aaa">N/T</span>')+'</td><td style="padding:8px 10px;text-align:center">'+(c.rating?'<strong>'+c.rating+'</strong>/5':'N/D')+'</td><td style="padding:8px 10px;text-align:center">'+c.n_recensioni+'</td><td style="padding:8px 10px;text-align:center">'+(c.rec_comp?'<span style="font-weight:700;color:'+(c.rec_comp.perc>=70?'#2e7d32':c.rec_comp.perc>=30?'#e65100':'#c62828')+'">'+c.rec_comp.perc+'%</span>':'<span style="color:#aaa">N/D</span>')+'</td><td style="padding:8px 10px;text-align:center">'+(c.ha_sito?'<span style="color:#2e7d32;font-weight:700">Si</span>':'<span style="color:#c62828;font-weight:700">No</span>')+'</td></tr>';
+      });
+      body += '</tbody></table></div></div>';
+    }
+
+    if (social.facebook||social.instagram) {
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Profili Social</div><div style="display:flex;gap:12px;flex-wrap:wrap">';
+      if (social.facebook) body += '<div style="flex:1;min-width:140px;border:1px solid #1877f2;border-radius:10px;overflow:hidden"><div style="background:#1877f2;padding:8px 14px"><span style="color:white;font-weight:700">Facebook</span></div><div style="padding:10px 14px">'+(social.facebook_follower?'<div style="font-size:1.2rem;font-weight:800;color:#1877f2;margin-bottom:5px">'+social.facebook_follower+'</div>':'')+'<a href="'+social.facebook+'" target="_blank" style="display:inline-block;padding:5px 12px;background:#1877f2;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri</a></div></div>';
+      if (social.instagram) body += '<div style="flex:1;min-width:140px;border:1px solid #e1306c;border-radius:10px;overflow:hidden"><div style="background:#e1306c;padding:8px 14px"><span style="color:white;font-weight:700">Instagram</span></div><div style="padding:10px 14px">'+(social.instagram_follower?'<div style="font-size:1.2rem;font-weight:800;color:#e1306c;margin-bottom:5px">'+social.instagram_follower+'</div>':'')+'<a href="'+social.instagram+'" target="_blank" style="display:inline-block;padding:5px 12px;background:#e1306c;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri</a></div></div>';
+      body += '</div></div>';
+    }
+
+    body += '<div style="margin-bottom:24px"><div style="'+sec+'">Visibilita su AI (Gemini, ChatGPT)</div><div style="display:flex;gap:14px;flex-wrap:wrap">';
+    body += '<div style="'+box+';flex-shrink:0;text-align:center;min-width:100px"><div style="font-size:3rem;font-weight:800;color:'+ai.colore+'">'+ai.score+'</div><div style="font-size:8.5pt;color:'+ai.colore+';font-weight:700;margin-top:4px">'+ai.livello+'</div><div style="font-size:8pt;color:#aaa">su 100</div></div>';
+    body += '<div style="flex:1;'+box+'"><div style="font-size:9pt;color:#555;margin-bottom:10px">Le AI generative citano attivita presenti su fonti autorevoli. Piu fonti = piu visibilita per "'+categoria+' a '+citta+'".</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">';
+    (ai.fonti||[]).forEach(function(f){ body += '<div style="display:flex;align-items:center;gap:5px;font-size:9pt"><span style="color:'+(f.ok?'#2e7d32':'#c62828')+';font-weight:700">'+(f.ok?'&#10003;':'&#10007;')+'</span><span style="color:'+(f.ok?'#2e7d32':'#888')+'">'+f.label+'</span></div>'; });
+    body += '</div></div></div></div>';
+
+    if (strategia) {
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Analisi Strategica e Obiettivi</div><div style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;font-size:9.5pt;color:#1a1a1a;line-height:1.7"><p style="margin-bottom:10px">'+strategia+'</p></div></div>';
+    }
+
+    body += proposalHtml;
+
+    var css = '*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}.pg{max-width:900px;margin:24px auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)}.hdr{background:#111;padding:20px 28px;display:flex;justify-content:space-between;align-items:center}.t{font-size:13pt;font-weight:700;color:white}.s{font-size:9pt;color:rgba(255,255,255,0.5);margin-top:2px}.d{font-size:8.5pt;color:rgba(255,255,255,0.4)}.lb{border-left:5px solid #E8001C;background:white;padding:13px 22px;margin:18px 26px 0;border-radius:0 8px 8px 0;border:1px solid #eee;border-left:5px solid #E8001C}.n{font-size:12pt;font-weight:700;margin-bottom:4px}.info{font-size:9pt;color:#777;display:flex;gap:14px;flex-wrap:wrap}.bd{padding:18px 26px 26px}.az{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;padding:14px 16px;background:#f9f9f9;border-radius:8px;border:1px solid #eee}.btn{padding:9px 18px;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;transition:opacity 0.2s}.btn:hover{opacity:0.9}.br{background:#E8001C;color:white}.bg{background:#2e7d32;color:white}@media print{.az,.no-print{display:none!important}body{background:white}.pg{box-shadow:none;margin:0;border-radius:0}}';
+
+    var fullHtml = '<div style="max-width:900px;margin:24px auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)">' +
+      '<div style="background:#111;padding:20px 28px;display:flex;justify-content:space-between;align-items:center"><div><div style="font-size:13pt;font-weight:700;color:white">Analisi Digitale Prevendita</div><div style="font-size:9pt;color:rgba(255,255,255,0.5);margin-top:2px">Lead Agent - Pagine Si!</div></div><div style="font-size:8.5pt;color:rgba(255,255,255,0.4)">'+oggi+'</div></div>' +
+      '<div style="border-left:5px solid #E8001C;background:white;padding:13px 22px;margin:18px 26px 0;border-radius:0 8px 8px 0;border:1px solid #eee;border-left:5px solid #E8001C"><div style="font-size:12pt;font-weight:700;margin-bottom:4px">'+nome+'</div><div style="font-size:9pt;color:#777;display:flex;gap:14px;flex-wrap:wrap"><span>'+(lead.indirizzo||'')+'</span>'+(web?'<span>Sito: <a href="'+web+'" target="_blank" style="color:#1565c0">'+web+'</a></span>':'<span style="color:#c62828">Nessun sito</span>')+'<span>Rating: '+(rating?rating+'/5 ('+nRating+' rec.)':'N/D')+'</span></div></div>' +
+      '<div style="padding:18px 26px 26px">' +
+      '<div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;padding:14px 16px;background:#f9f9f9;border-radius:8px;border:1px solid #eee" class="no-print">' +
+      '<button onclick="window.print()" style="padding:9px 18px;background:#E8001C;color:white;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">Stampa / PDF</button>' +
+      '<button id="ba" onclick="apriAnt()" style="padding:9px 18px;background:#2e7d32;color:white;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">Anteprima Sito</button>' +
+      '</div>' +
+      body +
+      '</div></div>' +
+      '<script>' +
+      'var B="https://leadagent-backend.onrender.com";' +
+      'var L='+JSON.stringify({nome:nome,indirizzo:lead.indirizzo||'',web:web||null,telefono:lead.telefono||null,tipi:lead.tipi||[],rating:rating,nRating:nRating,descrizione:lead.descrizione||null,placeId:lead.placeId||null,categoria:categoria,citta:citta,logoUrl:lead.logoUrl||null})+';' +
+      'function apriAnt(){' +
+      '  var btn=document.getElementById("ba");if(btn){btn.disabled=true;btn.textContent="Generazione...";}' +
+      '  var tab=window.open("","_blank");' +
+      '  fetch(B+"/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({nome:L.nome,indirizzo:L.indirizzo,telefono:L.telefono,tipi:L.tipi,rating:L.rating,nRating:L.nRating,descrizione:L.descrizione,logoUrl:L.logoUrl})})' +
+      '  .then(function(r){return r.json();})' +
+      '  .then(function(d){if(d.html&&tab&&!tab.closed){tab.document.open();tab.document.write(d.html);tab.document.close();}if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}})' +
+      '  .catch(function(e){if(tab&&!tab.closed)tab.close();if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}});' +
+      '}' +
+      '</script>';
+
+    res.json({ html: fullHtml });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const { router: proposalRouter } = require('./proposal');
 app.use('/proposal', proposalRouter);
 
