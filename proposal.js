@@ -505,10 +505,10 @@ function generaHTML(lead, prodotti, fatturato, consulente) {
   if (lead.rating && lead.rating >= 4.0) segnaliHTML.push(`<span class="tag ok">\u2705 Rating ${lead.rating}/5</span>`);
 
   const catIcone = {
-    'Sito Web': '\U0001f310', 'Directory PagineSi.it': '\U0001f4cb', 'Google Maps': '\U0001f4cd',
-    'Reputazione': '\u2b50', 'Social Media': '\U0001f4f1', 'SEO': '\U0001f50d',
-    'Google Ads': '\U0001f4e2', 'Social Ads': '\U0001f3af', 'Video': '\U0001f3ac',
-    'AI': '\U0001f916', 'eCommerce': '\U0001f6d2', 'Marketing Automation': '\u2699\ufe0f'
+    'Sito Web': '&#127760;', 'Directory PagineSi.it': '&#128203;', 'Google Maps': '&#128205;',
+    'Reputazione': '&#11088;', 'Social Media': '&#128241;', 'SEO': '&#128269;',
+    'Google Ads': '&#128226;', 'Social Ads': '&#127919;', 'Video': '&#127916;',
+    'AI': '&#129302;', 'eCommerce': '&#128722;', 'Marketing Automation': '&#9881;'
   };
 
   const areeHTML = categorieUsate.map(cat => {
