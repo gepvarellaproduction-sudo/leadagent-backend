@@ -81,29 +81,40 @@ app.post('/preview', async function(req, res) {
 });
 
 // Cerca profili social reali via Google
+function estraiFollower(snippet, title) {
+  // Cerca pattern tipo: 1.234 follower, 1,2K follower, 1.2K followers, 12K Mi piace
+  var testo = (snippet || '') + ' ' + (title || '');
+  var pattern = /(\d+[.,]?\d*)\s*[KkMm]?\s*(follower|followers|seguaci|Mi piace|like)/i;
+  var match = testo.match(pattern);
+  if (match) return match[0].trim();
+  // Pattern alternativo: K/M prima della parola
+  var pattern2 = /(\d+[.,]?\d*\s*[KkMm])\s+(follower|seguaci)/i;
+  var match2 = testo.match(pattern2);
+  if (match2) return match2[0].trim();
+  return null;
+}
+
 async function cercaSocial(nome, citta) {
-  var out = { facebook: null, facebook_snippet: null, instagram: null, instagram_snippet: null };
+  var out = { facebook: null, facebook_follower: null, instagram: null, instagram_follower: null };
   try {
     var items = await dfsSearch('"' + nome + '" ' + citta + ' facebook OR instagram', 10);
     items.forEach(function(item) {
       var url = (item.url || '').toLowerCase();
       var dom = (item.domain || '').toLowerCase();
-      // Estrai info utili dallo snippet Google
       var snippet = item.description || item.snippet || '';
+      var title = item.title || '';
       if (!out.facebook && dom.includes('facebook.com')) {
         var path = url.replace(/https?:\/\/(www\.)?facebook\.com\/?/,'');
         if (path && path.length > 2 && !path.startsWith('search') && !path.startsWith('watch') && !path.startsWith('groups')) {
           out.facebook = item.url;
-          out.facebook_snippet = snippet || null;
-          out.facebook_title = item.title || null;
+          out.facebook_follower = estraiFollower(snippet, title);
         }
       }
       if (!out.instagram && dom.includes('instagram.com')) {
         var path2 = url.replace(/https?:\/\/(www\.)?instagram\.com\/?/,'');
         if (path2 && path2.length > 2 && !path2.startsWith('explore') && !path2.startsWith('p/')) {
           out.instagram = item.url;
-          out.instagram_snippet = snippet || null;
-          out.instagram_title = item.title || null;
+          out.instagram_follower = estraiFollower(snippet, title);
         }
       }
     });
@@ -371,37 +382,33 @@ app.post('/analisi', async function(req, res) {
     } else {
       body += '<div style="display:flex;gap:14px;flex-wrap:wrap">';
       if (social.facebook) {
-        body += '<div style="flex:1;min-width:220px;border:1px solid #1877f2;border-radius:10px;overflow:hidden">';
-        body += '<div style="background:#1877f2;padding:10px 14px;display:flex;align-items:center;gap:8px">';
-        body += '<span style="color:white;font-weight:700;font-size:10pt">Facebook</span></div>';
-        body += '<div style="padding:12px 14px">';
-        if (social.facebook_title) {
-          body += '<div style="font-size:9pt;font-weight:600;color:#1a1a1a;margin-bottom:4px">' + social.facebook_title.replace(/[<>]/g,'') + '</div>';
+        body += '<div style="flex:1;min-width:200px;border:1px solid #1877f2;border-radius:10px;overflow:hidden">';
+        body += '<div style="background:#1877f2;padding:10px 16px"><span style="color:white;font-weight:700;font-size:10pt">Facebook</span></div>';
+        body += '<div style="padding:14px 16px">';
+        if (social.facebook_follower) {
+          body += '<div style="font-size:1.4rem;font-weight:800;color:#1877f2;margin-bottom:4px">' + social.facebook_follower + '</div>';
+          body += '<div style="font-size:8.5pt;color:#aaa;margin-bottom:10px">da snippet Google</div>';
+        } else {
+          body += '<div style="font-size:9pt;color:#aaa;margin-bottom:10px">Follower non rilevati da Google</div>';
         }
-        if (social.facebook_snippet) {
-          body += '<div style="font-size:8.5pt;color:#555;margin-bottom:8px;line-height:1.5">' + social.facebook_snippet.replace(/[<>]/g,'').slice(0,200) + '</div>';
-        }
-        body += '<div style="font-size:8pt;color:#aaa;margin-bottom:8px;word-break:break-all">' + social.facebook + '</div>';
-        body += '<a href="' + social.facebook + '" target="_blank" style="display:inline-block;padding:6px 14px;background:#1877f2;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a>';
+        body += '<a href="' + social.facebook + '" target="_blank" style="display:inline-block;padding:7px 16px;background:#1877f2;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a>';
         body += '</div></div>';
       }
       if (social.instagram) {
-        body += '<div style="flex:1;min-width:220px;border:1px solid #e1306c;border-radius:10px;overflow:hidden">';
-        body += '<div style="background:#e1306c;padding:10px 14px;display:flex;align-items:center;gap:8px">';
-        body += '<span style="color:white;font-weight:700;font-size:10pt">Instagram</span></div>';
-        body += '<div style="padding:12px 14px">';
-        if (social.instagram_title) {
-          body += '<div style="font-size:9pt;font-weight:600;color:#1a1a1a;margin-bottom:4px">' + social.instagram_title.replace(/[<>]/g,'') + '</div>';
+        body += '<div style="flex:1;min-width:200px;border:1px solid #e1306c;border-radius:10px;overflow:hidden">';
+        body += '<div style="background:#e1306c;padding:10px 16px"><span style="color:white;font-weight:700;font-size:10pt">Instagram</span></div>';
+        body += '<div style="padding:14px 16px">';
+        if (social.instagram_follower) {
+          body += '<div style="font-size:1.4rem;font-weight:800;color:#e1306c;margin-bottom:4px">' + social.instagram_follower + '</div>';
+          body += '<div style="font-size:8.5pt;color:#aaa;margin-bottom:10px">da snippet Google</div>';
+        } else {
+          body += '<div style="font-size:9pt;color:#aaa;margin-bottom:10px">Follower non rilevati da Google</div>';
         }
-        if (social.instagram_snippet) {
-          body += '<div style="font-size:8.5pt;color:#555;margin-bottom:8px;line-height:1.5">' + social.instagram_snippet.replace(/[<>]/g,'').slice(0,200) + '</div>';
-        }
-        body += '<div style="font-size:8pt;color:#aaa;margin-bottom:8px;word-break:break-all">' + social.instagram + '</div>';
-        body += '<a href="' + social.instagram + '" target="_blank" style="display:inline-block;padding:6px 14px;background:#e1306c;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a>';
+        body += '<a href="' + social.instagram + '" target="_blank" style="display:inline-block;padding:7px 16px;background:#e1306c;color:white;border-radius:6px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a>';
         body += '</div></div>';
       }
       body += '</div>';
-      body += '<div style="font-size:8.5pt;color:#aaa;margin-top:10px">Dati estratti da Google - verifica manualmente i profili per valutare attivita e contenuti recenti</div>';
+      body += '<div style="font-size:8.5pt;color:#aaa;margin-top:10px">Follower estratti dallo snippet Google quando disponibili - clicca per verifica manuale</div>';
     }
     body += '</div>';
 
