@@ -565,7 +565,13 @@ app.post('/analisi', async function(req, res) {
       '</div></div>' +
       '<script>' +
       'var B="https://leadagent-backend.onrender.com";' +
-      'var AP=' + JSON.stringify(analisiPayloadJson) + ';' +
+      'var AP=' + JSON.stringify({
+      lead: { nome: nome, web: web||null, rating: rating, nRating: nRating, categoria: categoria, citta: citta, _mapsPos: mapsData.posizione_maps_lead },
+      seo: { keyword: keyword, posizione: seo&&seo.posizione||null },
+      social: { facebook: social.facebook||null, facebook_follower: social.facebook_follower||null, instagram: social.instagram||null, instagram_follower: social.instagram_follower||null },
+      recensioni: recensioni ? { perc_risposta: recensioni.perc_risposta, campione: recensioni.campione, positive: recensioni.positive, negative: recensioni.negative, testi: recensioni.testi } : null,
+      competitor: competitor.map(function(c){ return { nome: c.nome, posizione_maps: c.posizione_maps, posizione_serp: c.posizione_serp, rating: c.rating }; })
+    }) + ';' +
       '(async function loadStrategia(){' +
       '  try{' +
       '    var r=await fetch(B+"/analisi-strategica",{method:"POST",headers:{"Content-Type":"application/json"},body:AP});' +
