@@ -320,36 +320,8 @@ app.post('/analisi', async function(req, res) {
       }
     }
 
-    // 4. Analisi Claude
-    var strategia = null;
-    try {
-      var recTesti = recensioni && recensioni.testi ? recensioni.testi.map(function(r){ return (r.rating||'?')+'/5: '+r.testo.slice(0,80); }).join(' | ') : 'nessuna';
-      var datiStr = [
-        'Attivita: '+nome+' ('+categoria+' a '+citta+')',
-        'Sito: '+(web||'nessun sito'),
-        'Rating: '+(rating||'N/D')+'/5 con '+nRating+' recensioni',
-        'Pos. Google "'+keyword+'": '+(seo&&seo.posizione?'#'+seo.posizione:'non trovato'),
-        'Pos. Maps: '+(mapsPos?'#'+mapsPos:'non trovato'),
-        'Facebook: '+(social.facebook?'presente'+(social.facebook_follower?' ('+social.facebook_follower+')':''):'assente'),
-        'Instagram: '+(social.instagram?'presente'+(social.instagram_follower?' ('+social.instagram_follower+')':''):'assente'),
-        'Recensioni: '+(recensioni?recensioni.perc_risposta+'% risposte su '+recensioni.campione+', '+recensioni.positive+' pos, '+recensioni.negative+' neg':'N/D'),
-        'Ultime rec: '+recTesti,
-        'Competitor: '+competitor.map(function(c){ return c.nome+' Maps#'+c.posizione_maps+(c.posizione_serp?'/Google#'+c.posizione_serp:'')+' '+c.rating+'/5'; }).join(', ')
-      ].join('\n');
-      var prompt = 'Sei un senior digital marketing strategist italiano per PMI locali. Analizza questi dati reali.\n\nDATI:\n'+datiStr+'\n\nPRODUCI (max 400 parole, **Titolo** per titoli in grassetto):\n**Situazione Attuale** - 2-3 gap critici con numeri reali\n**Analisi Recensioni** - punti forza, punti deboli, criticita dalle recensioni\n**Obiettivi a 90 Giorni** - 3 obiettivi con numeri specifici\n**Obiettivi a 6 Mesi** - 3 proiezioni concrete\n**Strategia Social** - uso Reels per questa categoria (3x reach vs post, +25-40% visite con 3+ reels/settimana)\n**Priorita Intervento** - i 3 servizi Pagine Si! piu urgenti';
-      var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 800, messages: [{ role: 'user', content: prompt }] })
-      });
-      var aiData = await aiResp.json();
-      if (aiData.content && aiData.content[0] && aiData.content[0].text) {
-        strategia = aiData.content[0].text
-          .split('**').map(function(t,i){ return i%2===1 ? '<strong>'+t+'</strong>' : t; }).join('')
-          .split('\n\n').join('</p><p style="margin-bottom:10px">')
-          .split('\n').join('<br>');
-      }
-    } catch(e) {}
+    // 4. Analisi Claude - dati per chiamata in background dalla pagina
+    var strategia = null; // caricata in background dal JS della pagina
 
     var ai = await calcolaAI(nome, citta, web, social, nRating, rating, seo);
     var oggi = new Date().toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
@@ -450,13 +422,30 @@ app.post('/analisi', async function(req, res) {
     });
     body += '</div></div></div></div>';
 
-    // ANALISI STRATEGICA
-    if (strategia) {
-      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Analisi Strategica e Obiettivi</div><div style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;font-size:9.5pt;color:#1a1a1a;line-height:1.7"><p style="margin-bottom:10px">'+strategia+'</p></div></div>';
-    }
+    // ANALISI STRATEGICA - skeleton, caricata in background
+    body += '<div style="margin-bottom:24px" id="strategia-wrap"><div style="'+sec+'">Analisi Strategica e Obiettivi</div>' +
+      '<div id="strategia-content" style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;text-align:center;color:#aaa;font-size:9.5pt">' +
+      '<div style="font-size:1.5rem;margin-bottom:8px">&#8987;</div>Analisi in corso...</div></div>';
 
     // Dati lead per JS interno
     var leadJson = JSON.stringify({ nome:nome, indirizzo:lead.indirizzo||'', web:web||null, telefono:lead.telefono||null, tipi:lead.tipi||[], rating:rating, nRating:nRating, descrizione:lead.descrizione||null, fotoRefs:lead.fotoRefs||[], placeId:lead.placeId||null, categoria:categoria, citta:citta, logoUrl:lead.logoUrl||null });
+
+    // Payload per analisi strategica (caricata in background)
+    var strategiaPayload = JSON.stringify({
+      nome:nome, categoria:categoria, citta:citta, web:web||null,
+      rating:rating, nRating:nRating,
+      pos_google: seo&&seo.posizione?('#'+seo.posizione):'non trovato',
+      pos_maps: mapsPos?('#'+mapsPos):'non trovato',
+      keyword: keyword,
+      facebook: social.facebook?('presente'+(social.facebook_follower?' ('+social.facebook_follower+')':'')):'assente',
+      instagram: social.instagram?('presente'+(social.instagram_follower?' ('+social.instagram_follower+')':'')):'assente',
+      recensioni_perc: recensioni?recensioni.perc_risposta:null,
+      recensioni_campione: recensioni?recensioni.campione:null,
+      recensioni_pos: recensioni?recensioni.positive:null,
+      recensioni_neg: recensioni?recensioni.negative:null,
+      recensioni_testi: recensioni&&recensioni.testi?recensioni.testi.map(function(r){return (r.rating||'?')+'/5: '+r.testo.slice(0,80);}).join(' | '):'nessuna',
+      competitor: competitor.map(function(c){return c.nome+' Maps#'+c.posizione_maps+(c.posizione_serp?'/Google#'+c.posizione_serp:'')+' '+(c.rating||'N/D')+'/5';}).join(', ')
+    });
 
     var css = '*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}.pg{max-width:900px;margin:24px auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)}.hdr{background:#111;padding:20px 28px;display:flex;justify-content:space-between;align-items:center}.hdr .t{font-size:13pt;font-weight:700;color:white}.hdr .s{font-size:9pt;color:rgba(255,255,255,0.5);margin-top:2px}.hdr .d{font-size:8.5pt;color:rgba(255,255,255,0.4)}.lb{border-left:5px solid #E8001C;background:white;padding:13px 22px;margin:18px 26px 0;border-radius:0 8px 8px 0;border:1px solid #eee;border-left:5px solid #E8001C}.lb .n{font-size:12pt;font-weight:700;margin-bottom:4px}.lb .i{font-size:9pt;color:#777;display:flex;gap:14px;flex-wrap:wrap}.bd{padding:18px 26px 26px}.az{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;padding:14px 16px;background:#f9f9f9;border-radius:8px;border:1px solid #eee}.btn{padding:9px 18px;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer}.btn:disabled{opacity:0.5;cursor:not-allowed}.br{background:#E8001C;color:white}.bk{background:#111;color:white}.bg{background:#2e7d32;color:white}.bgy{background:#f0f0f0;color:#555}#cp{display:none;background:#fff9e6;border:1px solid #ffe082;border-radius:8px;padding:12px 16px;margin-bottom:14px}.cr{display:flex;gap:8px;align-items:center;margin-top:8px}#ci{flex:1;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:10pt}@media print{.az{display:none}body{background:white}.pg{box-shadow:none;border-radius:0;margin:0}}';
 
@@ -478,16 +467,44 @@ app.post('/analisi', async function(req, res) {
       '</div>' +
       '<div id="prop-container"></div>' +
       '</div></div>' +
-      '<script>var B="https://leadagent-backend.onrender.com";var L='+leadJson+';' +
+      '<script>var B="https://leadagent-backend.onrender.com";var L='+leadJson+';var SP='+strategiaPayload+';' +
+      '(async function loadStrategia(){try{' +
+      '  var r=await fetch(B+"/analisi-strategica",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(SP)});' +
+      '  var d=await r.json();' +
+      '  var el=document.getElementById("strategia-content");' +
+      '  if(el&&d.testo){el.style.textAlign="left";el.style.color="#1a1a1a";el.innerHTML="<p style=\"margin-bottom:10px\">"+d.testo+"</p>";}' +
+      '}catch(e){var el=document.getElementById("strategia-content");if(el)el.innerHTML="Analisi non disponibile.";}' +
+      '})();' +
       'function richiediProp(){' +
-      '  var btn=document.getElementById("btn-gen-prop");if(btn){btn.disabled=true;btn.textContent="Generazione in corso...";}' +
-      '  window.parent.postMessage({type:"richiedi-proposta"},\"*\");' +
+      '  var btn=document.getElementById("btn-gen-prop");' +
+      '  if(btn){btn.disabled=true;btn.textContent="Generazione in corso...";}' +
+      '  var consulente=prompt("Nome del consulente:","") || "Consulente Pagine Si!";' +
+      '  var cont=document.getElementById("prop-container");' +
+      '  if(cont)cont.innerHTML="<div style=\"padding:32px;text-align:center;color:#aaa\">&#8987; Generazione proposta...</div>";' +
+      '  var analisiDati={' +
+      '    pos_google:"' + (seo&&seo.posizione?'#'+seo.posizione:'non trovato') + '",' +
+      '    pos_maps:"' + (mapsPos?'#'+mapsPos:'non trovato') + '",' +
+      '    social_fb:"' + (social.facebook?'presente':'assente') + '",' +
+      '    social_ig:"' + (social.instagram?'presente':'assente') + '",' +
+      '    rec_perc:' + (recensioni?recensioni.perc_risposta:0) + ',' +
+      '    rec_pos:' + (recensioni?recensioni.positive:0) + ',' +
+      '    rec_neg:' + (recensioni?recensioni.negative:0) + ',' +
+      '    competitor_sito:' + competitor.filter(function(c){return c.ha_sito;}).length + '' +
+      '  };' +
+      '  fetch(B+"/proposta-inline",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L,consulente:consulente,analisi:analisiDati})})' +
+      '  .then(function(r){return r.json();})' +
+      '  .then(function(d){' +
+      '    if(d.html&&cont){' +
+      '      cont.innerHTML=d.html;' +
+      '      setTimeout(function(){cont.scrollIntoView({behavior:"smooth"});},200);' +
+      '      if(btn){btn.textContent="Proposta generata";btn.style.background="#2e7d32";}' +
+      '    }' +
+      '  })' +
+      '  .catch(function(e){' +
+      '    if(cont)cont.innerHTML="";' +
+      '    if(btn){btn.disabled=false;btn.textContent="Genera Proposta Commerciale";}' +
+      '  });' +
       '}' +
-      'window.addEventListener("message",function(e){' +
-      '  if(!e.data)return;' +
-      '  if(e.data.type==="proposta-loading"){var c=document.getElementById("prop-container");if(c)c.innerHTML="<div style=\"padding:32px;text-align:center;color:#aaa\">&#8987; Generazione proposta in corso...</div>";}' +
-      '  if(e.data.type==="proposta-ready"&&e.data.html){var c=document.getElementById("prop-container");if(c){c.innerHTML=e.data.html;var b=document.getElementById("btn-gen-prop");if(b){b.textContent="Proposta generata";b.style.background="#2e7d32";}setTimeout(function(){c.scrollIntoView({behavior:"smooth"});},200);}}' +
-      '});' +
       'function toggleCP(){var p=document.getElementById("cp");p.style.display=p.style.display==="block"?"none":"block";if(p.style.display==="block")document.getElementById("ci").focus();}' +
       'function genProp(){' +
       '  var c=document.getElementById("ci").value.trim()||"Consulente Pagine Si!";' +
@@ -524,6 +541,26 @@ app.post('/proposta-inline', async function(req, res) {
     var proposalMod = require('./proposal');
     var fatturato = proposalMod.stimaFatturato(lead);
     var analisi = proposalMod.analisiDigitale(lead);
+    var analisiReale = req.body.analisi || {};
+
+    // Arricchisci analisi con dati reali
+    if (analisiReale.pos_google && analisiReale.pos_google !== 'non trovato') {
+      var posNum = parseInt(analisiReale.pos_google.replace('#',''));
+      if (posNum > 30) analisi.bisogni.seo = true;
+    } else if (!lead.web) {
+      analisi.bisogni.seo = false; // senza sito prima serve il sito
+    }
+    if (analisiReale.social_fb === 'assente' && analisiReale.social_ig === 'assente') {
+      analisi.bisogni.social = true;
+    }
+    if (analisiReale.rec_perc !== undefined && analisiReale.rec_perc < 30) {
+      analisi.bisogni.reputazione = true;
+    }
+    if (analisiReale.pos_maps && analisiReale.pos_maps !== 'non trovato') {
+      var mapsNum = parseInt(analisiReale.pos_maps.replace('#',''));
+      if (mapsNum > 5) analisi.bisogni.gbp = true;
+    }
+
     var prodotti = proposalMod.costruisciPreventivo(lead, fatturato, analisi);
     var PRODOTTI = proposalMod.PRODOTTI;
 
