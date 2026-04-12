@@ -80,6 +80,76 @@ app.post('/preview', async function(req, res) {
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
+
+// Cerca recensioni Google con percentuale risposte via DataForSEO Business Data API
+async function cercaRecensioni(placeId, nomeLead) {
+  if (!placeId && !nomeLead) return null;
+  try {
+    // Step 1: crea task
+    var payload = [{
+      depth: 10,
+      sort_by: 'newest',
+      location_code: 2380,
+      language_code: 'it'
+    }];
+    if (placeId) {
+      payload[0].place_id = placeId;
+    } else {
+      payload[0].keyword = nomeLead;
+    }
+
+    var postResp = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_post', {
+      method: 'POST',
+      headers: { 'Authorization': dfsAuth(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    var postData = await postResp.json();
+    var taskId = postData.tasks && postData.tasks[0] && postData.tasks[0].id;
+    if (!taskId) return null;
+
+    // Step 2: poll task_get (max 4 tentativi, ogni 3 secondi)
+    var risultati = null;
+    for (var attempt = 0; attempt < 4; attempt++) {
+      await new Promise(function(r){ setTimeout(r, 3000); });
+      var getResp = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_get/' + taskId, {
+        headers: { 'Authorization': dfsAuth() }
+      });
+      var getData = await getResp.json();
+      var task = getData.tasks && getData.tasks[0];
+      if (task && task.status_code === 20000 && task.result) {
+        risultati = task.result;
+        break;
+      }
+    }
+
+    if (!risultati || !risultati[0]) return null;
+
+    var result = risultati[0];
+    var items = result.items || [];
+    var totale = result.reviews_count || items.length;
+    var conRisposta = items.filter(function(r){ return !!r.owner_answer; }).length;
+    var percRisposta = items.length > 0 ? Math.round((conRisposta / items.length) * 100) : 0;
+
+    // Ultima recensione
+    var ultima = items[0] || null;
+
+    return {
+      totale_recensioni: totale,
+      campione: items.length,
+      con_risposta: conRisposta,
+      perc_risposta: percRisposta,
+      ultima_recensione: ultima ? {
+        testo: ultima.review_text || '',
+        rating: ultima.rating && ultima.rating.value,
+        time_ago: ultima.time_ago || '',
+        ha_risposta: !!ultima.owner_answer
+      } : null
+    };
+  } catch(e) {
+    return null;
+  }
+}
+
 // Cerca profili social reali via Google
 function estraiFollower(snippet, title) {
   // Cerca pattern tipo: 1.234 follower, 1,2K follower, 1.2K followers, 12K Mi piace
@@ -223,11 +293,13 @@ app.post('/analisi', async function(req, res) {
     // Tutte le ricerche in parallelo
     var risultati = await Promise.all([
       cercaPosizioneGoogle(nome, web, categoria, citta),
-      cercaSocial(nome, citta)
+      cercaSocial(nome, citta),
+      cercaRecensioni(lead.placeId, nome)
     ]);
 
     var seo = risultati[0];
     var social = risultati[1];
+    var recensioni = risultati[2];
     var serpItems = (seo && seo.items) || [];
 
     // Competitor con SERP
@@ -380,6 +452,31 @@ app.post('/analisi', async function(req, res) {
       body += '</div>';
     });
     body += '</div></div>';
+
+    // Recensioni Google
+    if (recensioni) {
+      var percColor = recensioni.perc_risposta >= 70 ? '#2e7d32' : recensioni.perc_risposta >= 30 ? '#e65100' : '#c62828';
+      var percLabel = recensioni.perc_risposta >= 70 ? 'Buona gestione' : recensioni.perc_risposta >= 30 ? 'Gestione parziale' : 'Scarsa gestione';
+      body += '<div style="margin-bottom:28px">';
+      body += '<div style="' + secStyle + '">Gestione Recensioni</div>';
+      body += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+      body += '<div style="flex:1;min-width:100px;' + boxStyle + ';text-align:center;margin-bottom:0"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Totale</div><div style="font-size:2.2rem;font-weight:800;color:#1a1a1a">' + recensioni.totale_recensioni + '</div></div>';
+      body += '<div style="flex:1;min-width:100px;' + boxStyle + ';text-align:center;margin-bottom:0"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">% risposte</div><div style="font-size:2.2rem;font-weight:800;color:' + percColor + '">' + recensioni.perc_risposta + '%</div><div style="font-size:8.5pt;color:' + percColor + ';font-weight:600;margin-top:3px">' + percLabel + '</div></div>';
+      body += '<div style="flex:1;min-width:100px;' + boxStyle + ';text-align:center;margin-bottom:0"><div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Su ' + recensioni.campione + ' analizzate</div><div style="font-size:2.2rem;font-weight:800;color:#1a1a1a">' + recensioni.con_risposta + '/' + recensioni.campione + '</div></div>';
+      body += '</div>';
+      if (recensioni.ultima_recensione && recensioni.ultima_recensione.testo) {
+        var ur = recensioni.ultima_recensione;
+        var stars = ur.rating ? ['&#9733;&#9733;&#9733;&#9733;&#9733;','&#9733;&#9733;&#9733;&#9733;&#9734;','&#9733;&#9733;&#9733;&#9734;&#9734;','&#9733;&#9733;&#9734;&#9734;&#9734;','&#9733;&#9734;&#9734;&#9734;&#9734;'][Math.max(0,5-Math.round(ur.rating))] : '';
+        var sColor = ur.rating >= 4 ? '#2e7d32' : ur.rating >= 3 ? '#e65100' : '#c62828';
+        body += '<div style="background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px 16px">';
+        body += '<div style="font-size:8.5pt;color:#aaa;text-transform:uppercase;margin-bottom:6px">Ultima recensione' + (ur.time_ago ? ' (' + ur.time_ago + ')' : '') + '</div>';
+        if (stars) body += '<div style="font-size:11pt;color:' + sColor + ';margin-bottom:5px">' + stars + '</div>';
+        body += '<div style="font-size:9.5pt;color:#555;line-height:1.5;font-style:italic">&quot;' + ur.testo.slice(0,250).replace(/[<>]/g,'') + (ur.testo.length > 250 ? '...' : '') + '&quot;</div>';
+        body += '<div style="font-size:8.5pt;margin-top:6px;font-weight:600;color:' + (ur.ha_risposta ? '#2e7d32' : '#c62828') + '">' + (ur.ha_risposta ? 'Il proprietario ha risposto' : 'Nessuna risposta del proprietario') + '</div>';
+        body += '</div>';
+      }
+      body += '</div>';
+    }
 
     // 3. Competitor analisi
     body += '<div style="margin-bottom:28px">';
@@ -542,8 +639,356 @@ app.post('/analisi', async function(req, res) {
   }
 });
 
-const { router: proposalRouter } = require('./proposal');
-app.use('/proposal', proposalRouter);
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, function() { console.log('LeadAgent Backend running on port ' + PORT); });
+// Endpoint unificato: analisi completa + proposta commerciale
+app.post('/analisi-proposta', async function(req, res) {
+  try {
+    var lead = req.body.lead;
+    if (!lead) return res.status(400).json({ error: 'Lead mancante' });
+
+    var nome = lead.nome || '';
+    var categoria = lead.categoria || '';
+    var citta = lead.citta || '';
+    var web = (lead.web && lead.web !== 'N/D') ? lead.web : null;
+    var nRating = lead.nRating || 0;
+    var rating = lead.rating || null;
+    var nomeNorm = nome.toLowerCase().trim();
+    var webNorm = web ? web.toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0] : null;
+
+    // Tutte le ricerche in parallelo
+    var risultati = await Promise.all([
+      cercaPosizioneGoogle(nome, web, categoria, citta),
+      cercaSocial(nome, citta),
+      cercaRecensioni(lead.placeId, nome)
+    ]);
+    var seo = risultati[0];
+    var social = risultati[1];
+    var recensioni = risultati[2];
+    var serpItems = (seo && seo.items) || [];
+    var mapsData = await cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems);
+    var competitor = mapsData.competitor;
+    var posizioneMapLead = mapsData.posizione_maps_lead;
+
+    // Preventivo personalizzato
+    var fatturato = stimaFatturato(lead);
+    var analisiDig = analisiDigitale(lead);
+    var prodotti = costruisciPreventivo(lead, fatturato, analisiDig);
+    if (lead.sigleExtra && lead.sigleExtra.length) {
+      var gia = new Set(prodotti.map(function(p){ return p.sigla; }));
+      lead.sigleExtra.forEach(function(s) {
+        if (!gia.has(s) && PRODOTTI[s]) prodotti.push({ sigla: s, ...PRODOTTI[s], motivazione: 'Aggiunto manualmente', priorita: 10 });
+      });
+    }
+
+    // Analisi strategica Claude
+    var analisiStrategica = '';
+    try {
+      var keyword = (seo && seo.keyword) || (categoria + ' ' + citta);
+      var datiStr = [
+        'Attivita: ' + nome + ' (' + categoria + ' a ' + citta + ')',
+        'Sito web: ' + (web || 'nessun sito'),
+        'Rating: ' + (rating || 'N/D') + '/5 con ' + nRating + ' recensioni',
+        'Posizione Google per "' + keyword + '": ' + (seo && seo.posizione ? '#'+seo.posizione : 'non trovato nei primi 100'),
+        'Posizione Maps: ' + (posizioneMapLead ? '#'+posizioneMapLead : 'non trovato'),
+        'Facebook: ' + (social.facebook ? 'presente' + (social.facebook_follower ? ' ('+social.facebook_follower+')' : '') : 'assente'),
+        'Instagram: ' + (social.instagram ? 'presente' + (social.instagram_follower ? ' ('+social.instagram_follower+')' : '') : 'assente'),
+        'Competitor: ' + competitor.map(function(c){ return c.nome+' Maps#'+c.posizione_maps+(c.posizione_serp?'/Google#'+c.posizione_serp:'')+' rating:'+(c.rating||'N/D'); }).join(', '),
+        'Servizi proposti: ' + prodotti.map(function(p){ return p.sigla; }).join(', ')
+      ].join('\n');
+
+      var prompt = [
+        'Sei un senior digital marketing strategist italiano per PMI locali.',
+        'Analizza questi dati e produci una analisi strategica in italiano.',
+        '',
+        'DATI REALI:',
+        datiStr,
+        '',
+        'SERVIZI PAGINE SI! GIA SELEZIONATI: ' + prodotti.map(function(p){ return p.nome; }).join(', '),
+        '',
+        'PRODUCI (max 350 parole, titoli con **Titolo**):',
+        '1. **Situazione Attuale** - gap critici in 2-3 righe con numeri reali',
+        '2. **Obiettivi a 90 Giorni** - 3 obiettivi con numeri specifici basati sui dati',
+        '3. **Obiettivi a 6 Mesi** - 3 proiezioni concrete',
+        '4. **Strategia Social** - come usare Reels per questa categoria (i Reels ottengono 3x piu reach dei post statici, attivita con 3+ reels/settimana aumentano visite del 25-40%)',
+        '5. **Perche questi Servizi** - spiega in 2 righe perche i servizi selezionati risolvono i gap specifici di questa attivita'
+      ].join('\n');
+
+      var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 700, messages: [{ role: 'user', content: prompt }] })
+      });
+      var aiData = await aiResp.json();
+      if (aiData.content && aiData.content[0] && aiData.content[0].text) {
+        analisiStrategica = aiData.content[0].text
+          .split('**').map(function(t,i){ return i%2===1 ? '<strong>'+t+'</strong>' : t; }).join('')
+          .split('\n\n').join('</p><p style="margin-bottom:10px">')
+          .split('\n').join('<br>');
+      }
+    } catch(e) {}
+
+    // Genera HTML completo: analisi + proposta
+    var oggi = new Date().toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
+    var scadenza = new Date(Date.now()+30*24*60*60*1000).toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
+    var totAnno1 = prodotti.reduce(function(s,p){ return s+(p.anno1||0); }, 0);
+    var totMens = prodotti.reduce(function(s,p){ return s+(p.mens||0); }, 0);
+
+    var secStyle = 'font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C';
+    var boxStyle = 'background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:16px 18px;margin-bottom:20px';
+
+    // Sezione posizionamento
+    var keyword = (seo && seo.keyword) || (categoria + ' ' + citta);
+    var gPos = seo && seo.posizione;
+    var gColor = gPos ? (gPos<=10?'#2e7d32':gPos<=30?'#e65100':'#c62828') : '#c62828';
+    var gLabel = gPos ? '#'+gPos : (seo&&seo.no_sito?'No sito':'N/T');
+    var mPos = posizioneMapLead;
+    var mColor = mPos ? (mPos<=3?'#2e7d32':mPos<=7?'#e65100':'#c62828') : '#9e9e9e';
+
+    var bodyHtml = '';
+
+    // Posizionamento
+    bodyHtml += '<div style="margin-bottom:24px">';
+    bodyHtml += '<div style="'+secStyle+'">Posizionamento - '+keyword+'</div>';
+    bodyHtml += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
+    bodyHtml += '<div style="flex:1;min-width:120px;'+boxStyle+';text-align:center;margin-bottom:0">';
+    bodyHtml += '<div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Google Organico</div>';
+    bodyHtml += '<div style="font-size:2.4rem;font-weight:800;color:'+gColor+'">'+gLabel+'</div>';
+    bodyHtml += '</div>';
+    bodyHtml += '<div style="flex:1;min-width:120px;'+boxStyle+';text-align:center;margin-bottom:0">';
+    bodyHtml += '<div style="font-size:8.5pt;color:#777;text-transform:uppercase;margin-bottom:6px">Google Maps</div>';
+    bodyHtml += '<div style="font-size:2.4rem;font-weight:800;color:'+mColor+'">'+(mPos?'#'+mPos:'N/T')+'</div>';
+    bodyHtml += '</div>';
+    bodyHtml += '</div></div>';
+
+    // Competitor
+    if (competitor && competitor.length) {
+      bodyHtml += '<div style="margin-bottom:24px">';
+      bodyHtml += '<div style="'+secStyle+'">Competitor di Zona</div>';
+      bodyHtml += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:9pt">';
+      bodyHtml += '<thead><tr style="background:#111;color:white"><th style="padding:8px 10px;text-align:left">Attivita</th><th style="padding:8px 10px;text-align:center">Maps</th><th style="padding:8px 10px;text-align:center">Google</th><th style="padding:8px 10px;text-align:center">Rating</th><th style="padding:8px 10px;text-align:center">Rec.</th><th style="padding:8px 10px;text-align:center">Sito</th></tr></thead><tbody>';
+      competitor.forEach(function(c,idx) {
+        var bg = idx%2===0?'white':'#fafafa';
+        bodyHtml += '<tr style="background:'+bg+';border-bottom:1px solid #f0f0f0">';
+        bodyHtml += '<td style="padding:8px 10px;font-weight:600">'+c.nome+'</td>';
+        bodyHtml += '<td style="padding:8px 10px;text-align:center"><span style="background:#e8f5e9;color:#2e7d32;padding:1px 7px;border-radius:4px;font-weight:700">#'+c.posizione_maps+'</span></td>';
+        bodyHtml += '<td style="padding:8px 10px;text-align:center">'+(c.posizione_serp?'<span style="background:#e8f5e9;color:#2e7d32;padding:1px 7px;border-radius:4px;font-weight:700">#'+c.posizione_serp+'</span>':'<span style="color:#aaa">N/T</span>')+'</td>';
+        bodyHtml += '<td style="padding:8px 10px;text-align:center">'+(c.rating?'<strong>'+c.rating+'</strong>':'N/D')+'</td>';
+        bodyHtml += '<td style="padding:8px 10px;text-align:center">'+c.n_recensioni+'</td>';
+        bodyHtml += '<td style="padding:8px 10px;text-align:center">'+(c.ha_sito?'<span style="color:#2e7d32;font-weight:700">Si</span>':'<span style="color:#c62828;font-weight:700">No</span>')+'</td>';
+        bodyHtml += '</tr>';
+      });
+      bodyHtml += '</tbody></table></div></div>';
+    }
+
+    // Social
+    if (social.facebook || social.instagram) {
+      bodyHtml += '<div style="margin-bottom:24px">';
+      bodyHtml += '<div style="'+secStyle+'">Profili Social</div>';
+      bodyHtml += '<div style="display:flex;gap:12px;flex-wrap:wrap">';
+      if (social.facebook) {
+        bodyHtml += '<div style="flex:1;min-width:160px;border:1px solid #1877f2;border-radius:8px;overflow:hidden">';
+        bodyHtml += '<div style="background:#1877f2;padding:8px 14px"><span style="color:white;font-weight:700">Facebook</span></div>';
+        bodyHtml += '<div style="padding:12px 14px">';
+        if (social.facebook_follower) bodyHtml += '<div style="font-size:1.4rem;font-weight:800;color:#1877f2;margin-bottom:4px">'+social.facebook_follower+'</div><div style="font-size:8pt;color:#aaa;margin-bottom:8px">da Google snippet</div>';
+        bodyHtml += '<a href="'+social.facebook+'" target="_blank" style="padding:5px 12px;background:#1877f2;color:white;border-radius:5px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a>';
+        bodyHtml += '</div></div>';
+      }
+      if (social.instagram) {
+        bodyHtml += '<div style="flex:1;min-width:160px;border:1px solid #e1306c;border-radius:8px;overflow:hidden">';
+        bodyHtml += '<div style="background:#e1306c;padding:8px 14px"><span style="color:white;font-weight:700">Instagram</span></div>';
+        bodyHtml += '<div style="padding:12px 14px">';
+        if (social.instagram_follower) bodyHtml += '<div style="font-size:1.4rem;font-weight:800;color:#e1306c;margin-bottom:4px">'+social.instagram_follower+'</div><div style="font-size:8pt;color:#aaa;margin-bottom:8px">da Google snippet</div>';
+        bodyHtml += '<a href="'+social.instagram+'" target="_blank" style="padding:5px 12px;background:#e1306c;color:white;border-radius:5px;font-size:9pt;font-weight:600;text-decoration:none">Apri profilo</a>';
+        bodyHtml += '</div></div>';
+      }
+      bodyHtml += '</div></div>';
+    }
+
+    // Recensioni in analisi-proposta
+    if (recensioni) {
+      var percColorP = recensioni.perc_risposta >= 70 ? '#2e7d32' : recensioni.perc_risposta >= 30 ? '#e65100' : '#c62828';
+      var percLabelP = recensioni.perc_risposta >= 70 ? 'Buona gestione' : recensioni.perc_risposta >= 30 ? 'Gestione parziale' : 'Scarsa gestione';
+      bodyHtml += '<div style="margin-bottom:24px">';
+      bodyHtml += '<div style="'+secStyle+'">Gestione Recensioni</div>';
+      bodyHtml += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">Totale</div><div style="font-size:2rem;font-weight:800">'+recensioni.totale_recensioni+'</div></div>';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">% risposte</div><div style="font-size:2rem;font-weight:800;color:'+percColorP+'">'+recensioni.perc_risposta+'%</div><div style="font-size:8pt;color:'+percColorP+';font-weight:600;margin-top:3px">'+percLabelP+'</div></div>';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">Su '+recensioni.campione+' analizzate</div><div style="font-size:2rem;font-weight:800">'+recensioni.con_risposta+'/'+recensioni.campione+'</div></div>';
+      bodyHtml += '</div>';
+      if (recensioni.ultima_recensione && recensioni.ultima_recensione.testo) {
+        var urP = recensioni.ultima_recensione;
+        bodyHtml += '<div style="background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:12px 14px">';
+        bodyHtml += '<div style="font-size:8pt;color:#aaa;text-transform:uppercase;margin-bottom:5px">Ultima recensione</div>';
+        bodyHtml += '<div style="font-size:9.5pt;color:#555;line-height:1.5;font-style:italic">&quot;'+urP.testo.slice(0,200).replace(/[<>]/g,'')+(urP.testo.length>200?'...':'')+'&quot;</div>';
+        bodyHtml += '<div style="font-size:8.5pt;margin-top:5px;font-weight:600;color:'+(urP.ha_risposta?'#2e7d32':'#c62828')+'">'+(urP.ha_risposta?'Il proprietario ha risposto':'Nessuna risposta del proprietario')+'</div>';
+        bodyHtml += '</div>';
+      }
+      bodyHtml += '</div>';
+    }
+
+    // Recensioni in proposta
+    if (recensioni) {
+      var percColorP = recensioni.perc_risposta >= 70 ? '#2e7d32' : recensioni.perc_risposta >= 30 ? '#e65100' : '#c62828';
+      var percLabelP = recensioni.perc_risposta >= 70 ? 'Buona gestione' : recensioni.perc_risposta >= 30 ? 'Gestione parziale' : 'Scarsa gestione';
+      bodyHtml += '<div style="margin-bottom:24px">';
+      bodyHtml += '<div style="'+secStyle+'">Gestione Recensioni</div>';
+      bodyHtml += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">Totale</div><div style="font-size:2rem;font-weight:800">'+recensioni.totale_recensioni+'</div></div>';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">% risposte</div><div style="font-size:2rem;font-weight:800;color:'+percColorP+'">'+recensioni.perc_risposta+'%</div><div style="font-size:8pt;color:'+percColorP+';font-weight:600;margin-top:3px">'+percLabelP+'</div></div>';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">Su '+recensioni.campione+' analizzate</div><div style="font-size:2rem;font-weight:800">'+recensioni.con_risposta+'/'+recensioni.campione+'</div></div>';
+      bodyHtml += '</div>';
+      if (recensioni.ultima_recensione && recensioni.ultima_recensione.testo) {
+        var urP = recensioni.ultima_recensione;
+        bodyHtml += '<div style="background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:12px 14px">';
+        bodyHtml += '<div style="font-size:8pt;color:#aaa;text-transform:uppercase;margin-bottom:5px">Ultima recensione</div>';
+        bodyHtml += '<div style="font-size:9.5pt;color:#555;line-height:1.5;font-style:italic">&quot;'+urP.testo.slice(0,200).replace(/[<>]/g,'')+(urP.testo.length>200?'...':'')+'&quot;</div>';
+        bodyHtml += '<div style="font-size:8.5pt;margin-top:5px;font-weight:600;color:'+(urP.ha_risposta?'#2e7d32':'#c62828')+'">'+(urP.ha_risposta?'Il proprietario ha risposto':'Nessuna risposta del proprietario')+'</div>';
+        bodyHtml += '</div>';
+      }
+      bodyHtml += '</div>';
+    }
+
+    // Recensioni in proposta
+    if (recensioni) {
+      var percColorP = recensioni.perc_risposta >= 70 ? '#2e7d32' : recensioni.perc_risposta >= 30 ? '#e65100' : '#c62828';
+      var percLabelP = recensioni.perc_risposta >= 70 ? 'Buona gestione' : recensioni.perc_risposta >= 30 ? 'Gestione parziale' : 'Scarsa gestione';
+      bodyHtml += '<div style="margin-bottom:24px">';
+      bodyHtml += '<div style="'+secStyle+'">Gestione Recensioni</div>';
+      bodyHtml += '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">Totale</div><div style="font-size:2rem;font-weight:800">'+recensioni.totale_recensioni+'</div></div>';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">% risposte</div><div style="font-size:2rem;font-weight:800;color:'+percColorP+'">'+recensioni.perc_risposta+'%</div><div style="font-size:8pt;color:'+percColorP+';font-weight:600;margin-top:3px">'+percLabelP+'</div></div>';
+      bodyHtml += '<div style="flex:1;min-width:100px;'+boxStyle+';text-align:center;margin-bottom:0"><div style="font-size:8pt;color:#777;text-transform:uppercase;margin-bottom:5px">Su '+recensioni.campione+' analizzate</div><div style="font-size:2rem;font-weight:800">'+recensioni.con_risposta+'/'+recensioni.campione+'</div></div>';
+      bodyHtml += '</div>';
+      if (recensioni.ultima_recensione && recensioni.ultima_recensione.testo) {
+        var urP = recensioni.ultima_recensione;
+        bodyHtml += '<div style="background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:12px 14px">';
+        bodyHtml += '<div style="font-size:8pt;color:#aaa;text-transform:uppercase;margin-bottom:5px">Ultima recensione</div>';
+        bodyHtml += '<div style="font-size:9.5pt;color:#555;line-height:1.5;font-style:italic">&quot;'+urP.testo.slice(0,200).replace(/[<>]/g,'')+(urP.testo.length>200?'...':'')+'&quot;</div>';
+        bodyHtml += '<div style="font-size:8.5pt;margin-top:5px;font-weight:600;color:'+(urP.ha_risposta?'#2e7d32':'#c62828')+'">'+(urP.ha_risposta?'Il proprietario ha risposto':'Nessuna risposta del proprietario')+'</div>';
+        bodyHtml += '</div>';
+      }
+      bodyHtml += '</div>';
+    }
+
+    // Analisi strategica
+    if (analisiStrategica) {
+      bodyHtml += '<div style="margin-bottom:24px">';
+      bodyHtml += '<div style="'+secStyle+'">Analisi Strategica e Obiettivi</div>';
+      bodyHtml += '<div style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;font-size:9.5pt;color:#1a1a1a;line-height:1.7">';
+      bodyHtml += '<p style="margin-bottom:10px">'+analisiStrategica+'</p>';
+      bodyHtml += '</div></div>';
+    }
+
+    // Proposta commerciale
+    var righe = prodotti.map(function(p,i) {
+      return '<tr class="removable" id="row-'+i+'" data-anno1="'+(p.anno1||0)+'" data-mens="'+(p.mens||0)+'" style="border-bottom:1px solid #f0f0f0">' +
+        '<td style="padding:10px 12px;font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600">'+p.sigla+'</td>' +
+        '<td style="padding:10px 12px"><div style="font-weight:600;margin-bottom:2px" contenteditable="true">'+p.nome+'</div><div style="font-size:8.5pt;color:#777" contenteditable="true">'+p.desc+'</div><div style="font-size:8pt;color:#aaa;font-style:italic" contenteditable="true">'+p.motivazione+'</div></td>' +
+        '<td style="padding:10px 12px;font-size:8.5pt"><span style="background:#f5f5f5;padding:2px 8px;border-radius:4px">'+p.cat+'</span></td>' +
+        '<td style="padding:10px 12px;text-align:right;font-weight:600;white-space:nowrap">'+(p.anno1?'&euro; '+p.anno1.toLocaleString('it-IT'):'&mdash;')+'</td>' +
+        '<td style="padding:10px 12px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td>' +
+        '<td style="text-align:center" class="no-print"><button onclick="rimuoviRiga('+i+')" style="background:none;border:none;cursor:pointer;color:#ccc;font-size:14px;padding:4px 8px">&#10005;</button></td>' +
+        '</tr>';
+    }).join('');
+
+    var consulente = req.body.consulente || 'Consulente Pagine Si!';
+
+    var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>Analisi e Proposta - '+nome+'</title>' +
+      '<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}' +
+      '.page{max-width:920px;margin:0 auto;background:white}' +
+      '.cover{background:#111;color:white;padding:40px 40px 32px;position:relative;overflow:hidden}' +
+      '.cover-bg{position:absolute;top:-40px;right:-40px;width:200px;height:200px;background:#E8001C;border-radius:50%;opacity:0.12}' +
+      '.cover h1{font-size:24pt;font-weight:800;letter-spacing:-0.03em;line-height:1.1;margin-bottom:8px}' +
+      '.cover h1 em{font-style:normal;color:#E8001C}' +
+      '.cover-sub{font-size:10pt;color:rgba(255,255,255,0.5)}' +
+      '.meta{background:#f9f9f9;border-bottom:1px solid #eee;padding:12px 40px;display:flex;gap:28px;flex-wrap:wrap}' +
+      '.meta-i{display:flex;flex-direction:column;gap:2px}' +
+      '.meta-l{font-size:8pt;color:#aaa;text-transform:uppercase;letter-spacing:0.06em}' +
+      '.meta-v{font-size:9.5pt;font-weight:600}' +
+      '.body{padding:30px 40px}' +
+      '.divider{border:none;border-top:3px solid #E8001C;margin:28px 0}' +
+      '.tot-box{background:#111;color:white;border-radius:8px;padding:18px 22px;margin-bottom:20px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;align-items:center}' +
+      '.tot-item{text-align:center}.tot-lbl{font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px}' +
+      '.tot-val{font-size:18pt;font-weight:800;color:#E8001C}' +
+      '.no-print{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}' +
+      '.btn-print{padding:8px 18px;background:#E8001C;color:white;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer}' +
+      '.btn-close{padding:8px 18px;background:#f5f5f5;color:#555;border:1px solid #ddd;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer}' +
+      'table{width:100%;border-collapse:collapse}thead tr{background:#111;color:white}thead th{padding:9px 12px;text-align:left;font-size:8.5pt;font-weight:500;letter-spacing:0.03em}' +
+      'tbody tr:nth-child(even){background:#fafafa}' +
+      '@media print{.no-print{display:none}body{background:white}.page{max-width:100%}}' +
+      '</style></head><body>' +
+      '<div class="page">' +
+      '<div class="cover"><div class="cover-bg"></div>' +
+      '<div style="margin-bottom:28px"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiBpZD0iTGF5ZXJfMSIgeD0iMHB4IiB5PSIwcHgiIHZpZXdCb3g9IjAgMCAxMjAwIDQwMCIgc3R5bGU9ImVuYWJsZS1iYWNrZ3JvdW5kOm5ldyAwIDAgMTIwMCA0MDA7IiB4bWw6c3BhY2U9InByZXNlcnZlIj48c3R5bGUgdHlwZT0idGV4dC9jc3MiPgkuc3Qwe2ZpbGw6I0ZGRkZGRjt9CS5zdDF7ZmlsbDp1cmwoI1NWR0lEXzFfKTt9CS5zdDJ7ZmlsbDp1cmwoI1NWR0lEXzAwMDAwMTEzMzE1OTAwMzAyMzgxNTIzMjIwMDAwMDAyOTYwMTM2MjM2ODY4NTIxMzYxXyk7fQkuc3Qze2ZpbGw6dXJsKCNTVkdJRF8wMDAwMDE4MTA0NjQzMDY2MTczNjk2ODAzMDAwMDAwOTY4MjgxNDU1MjM4MDMyNDI4NV8pO30JLnN0NHtmaWxsOnVybCgjU1ZHSURfMDAwMDAxMDgzMTA4NDI2NzQ0Mjk3NTUwODAwMDAwMTM2MzUzMjc5NzUxODMyNTY5ODZfKTt9CS5zdDV7ZmlsbDp1cmwoI1NWR0lEXzAwMDAwMTMzNDk3NzA5MzM3OTM2MTQ4NTkwMDAwMDE2MTg4MzY4ODkzODg4NTYxODM0Xyk7fTwvc3R5bGU+PGc+CTxnPgkJPHBhdGggY2xhc3M9InN0MCIgZD0iTTE3Ny4zLDI2Ni42Yy0xNi4yLDAtMjkuMi01LjctMzguNC0xNi41bDAuNSw1NS45YzAsMS4zLTEsMi40LTIuMywyLjRoLTM1LjJjLTEuMywwLTIuNC0xLTIuNC0yLjRsMC44LTk2LjYgICBsLTAuOC03Ny41YzAtMS4zLDEtMi40LDIuNC0yLjRoMzVjMS4zLDAsMi40LDEsMi40LDIuNGwtMC44LDEzLjNjOS40LTExLjUsMjIuNy0xOC4zLDM5LjctMTguM2MzOC4xLDAsNTguMiwzMC4zLDU4LjIsNjkuNSAgIEMyMzYuMywyMzUuMywyMTMuOSwyNjYuNiwxNzcuMywyNjYuNnogTTE2Ni4zLDI0MC4yYzE5LjgsMCwzMC0xNC40LDMwLTQxLjhjMC0yOS44LTEwLjItNDQuOS0yOS4yLTQ0LjlzLTI5LjIsMTQuNC0yOS41LDQyLjMgICBDMTM3LjQsMjI0LjMsMTQ3LjUsMjQwLjIsMTY2LjMsMjQwLjJ6Ij48L3BhdGg+CQk8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMzQyLjMsMjY0Yy0xLjMsMC0yLjMtMS0yLjMtMi40bDAuNS0xMy4zYy05LjQsMTEuNS0yMi43LDE4LjMtMzkuNywxOC4zYy0zOC4xLDAtNTguMi0zMC4zLTU4LjItNjkuNSAgIGMwLTM4LjksMjIuNS03MC4yLDU5LTcwLjJjMTYuNywwLDI5LjgsNiwzOC45LDE3bC0wLjgtMTJjMC0xLjMsMS0yLjQsMi40LTIuNGgzNWMxLjMsMCwyLjQsMSwyLjQsMi40bC0wLjgsNjVsMC44LDY0LjggICBjMCwxLjMtMSwyLjQtMi40LDIuNEgzNDIuM3ogTTMxMS44LDI0MC41YzE5LjEsMCwyOS4yLTE0LjQsMjkuNS00Mi44YzAuMy0yOC43LTkuOS00NC40LTI4LjctNDQuNmMtMTkuOC0wLjUtMzAsMTQuNC0zMCw0MiAgIEMyODIuNSwyMjUuMywyOTMsMjQwLjgsMzExLjgsMjQwLjV6Ij48L3BhdGg+CQk8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNDU4LDMxNi4yYy0zNS4yLDAuNS02Mi4xLTEzLjgtNjQuMi00My4zYzAtMS4zLDEtMi40LDIuNC0yLjRoMzMuN2MxLjYsMCwyLjYsMSwyLjksMi40ICAgYzEuOCwxMSwxMC43LDE3LjUsMjYuNiwxNy41YzE3LDAsMjguNy05LjQsMjguNy0zMC41di0xNS40Yy04LjksMTEuNy0yMS45LDE4LjgtMzguNiwxOC44Yy0zOS45LDAtNjAuOC0yOS41LTYwLjgtNjcuNCAgIGMwLTM3LjYsMjIuNS02OC4xLDU5LTY4LjFjMTYuNywwLDI5LjgsNS43LDM4LjksMTYuNWwtMC44LTEyLjNjMC0xLjMsMS0yLjQsMi40LTIuNGgzNC41YzEuMywwLDIuNCwxLDIuNCwyLjRsLTAuNSw2Ni44bDAuMyw2MS42ICAgQzUyNC42LDI5NC4zLDUwMi40LDMxNi4yLDQ1OCwzMTYuMnogTTQ1Ny43LDIzNy42YzE5LjEsMCwyOS4yLTEzLjYsMjkuNS00MC43YzAuMy0yNy45LTkuOS00My4zLTI4LjctNDMuNiAgIGMtMTkuOC0wLjUtMzAsMTQuMS0zMCw0MUM0MjguNSwyMjMuMyw0MzguOSwyMzcuOSw0NTcuNywyMzcuNnoiPjwvcGF0aD4JCTxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik01NDAuNSwxMTYuNWMtMS4zLDAtMi40LTEtMi40LTIuM1Y4My42YzAtMS4zLDEtMi40LDIuNC0yLjRoMzVjMS4zLDAsMi40LDEsMi40LDIuNHYzMC41ICAgYzAsMS4zLTEsMi4zLTIuNCwyLjNINTQwLjV6IE01NDAuNSwyNjRjLTEuMywwLTIuNC0xLTIuNC0yLjRsMC44LTY0LjhsLTAuOC02NWMwLTEuMywxLTIuNCwyLjQtMi40aDM1LjJjMS4zLDAsMi40LDEsMi40LDIuNCAgIGwtMC44LDY1bDAuOCw2NC44YzAsMS4zLTEsMi40LTIuNCwyLjRINTQwLjV6Ij48L3BhdGg+CQk8cGF0aCBjbGFzcz0ic3QwIiBkPSJNNTkzLjUsMjY0Yy0xLjMsMC0yLjQtMS0yLjQtMi40bDAuOC02Mi4xbC0wLjMtNjcuNmMwLTEuMywxLTIuNCwyLjQtMi40aDMzLjJjMS4zLDAsMi40LDEsMi40LDIuNGwtMC44LDE0LjYgICBjOS4xLTExLjcsMjQuNS0yMC4xLDQzLjMtMjAuMWMyOC41LDAsNDYuNywxOS4zLDQ2LjcsNTIuMnYyOC4ybDAuOCw1NC44YzAsMS4zLTEsMi40LTIuNCwyLjRoLTM1Yy0xLjMsMC0yLjQtMS0yLjQtMi40bDAuNS01NC44ICAgdi0yNy43YzAtMTQuNi04LjYtMjQtMjAuNC0yNGMtMTQuMSwwLTI5LjIsMTMuMS0yOS4yLDQxLjh2OS45bDAuNSw1NC44YzAsMS4zLTEsMi40LTIuNCwyLjRINTkzLjV6Ij48L3BhdGg+CQk8cGF0aCBjbGFzcz0ic3QwIiBkPSJNODU5LDIxOC42YzEuMywwLDIuNCwxLDIuMSwyLjRjLTMuNCwyNC41LTI2LjksNDYuNS02NC41LDQ2LjVjLTQ0LjksMC02OS4yLTI5LjUtNjkuMi03MC4yICAgYzAtNDIuOCwyNS42LTcxLDY4LjQtNzFjNDQuMSwwLDY4LjcsMjkuMiw2OS41LDc2LjJjMCwxLjMtMSwyLjQtMi4zLDIuNGgtOTYuMWMxLjYsMjUuMywxMS41LDM2LjYsMzAuMywzNi42ICAgYzEzLjEsMCwyMi41LTYsMjYuMS0yMC40YzAuMy0xLjMsMS42LTIuNCwyLjktMi40SDg1OXogTTc5Ni4xLDE1MmMtMTUuNywwLTI1LjEsOS40LTI4LjIsMjcuOUg4MjMgICBDODIxLjQsMTY1LjYsODEzLjMsMTUyLDc5Ni4xLDE1MnoiPjwvcGF0aD4JCTwvZz48L2c+PC9zdmc+" alt="Pagine Si!" style="height:36px;width:auto" /></div>' +
+      '<h1>Analisi e Proposta<br><em>Commerciale</em></h1>' +
+      '<p class="cover-sub">Comunicazione e Marketing Digitale su misura</p>' +
+      '</div>' +
+      '<div class="meta">' +
+      '<div class="meta-i"><span class="meta-l">Preparata per</span><span class="meta-v">'+nome+'</span></div>' +
+      '<div class="meta-i"><span class="meta-l">Data</span><span class="meta-v">'+oggi+'</span></div>' +
+      '<div class="meta-i"><span class="meta-l">Consulente</span><span class="meta-v">'+consulente+'</span></div>' +
+      '<div class="meta-i"><span class="meta-l">Valida fino al</span><span class="meta-v">'+scadenza+'</span></div>' +
+      '</div>' +
+      '<div class="body">' +
+      '<div class="no-print">' +
+      '<button class="btn-print" onclick="window.print()">Stampa / Salva PDF</button>' +
+      '<button class="btn-close" onclick="window.close()">Chiudi</button>' +
+      '</div>' +
+      '<div style="font-size:9.5pt;background:#fff9e6;border:1px solid #ffe082;border-radius:8px;padding:10px 16px;margin-bottom:20px;color:#795548" class="no-print">&#9999;&#65039; <strong>Proposta modificabile</strong> &mdash; clicca sui testi per modificarli, clicca &#10005; per rimuovere righe</div>' +
+      bodyHtml +
+      '<hr class="divider">' +
+      '<div style="font-size:10.5pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #E8001C">Soluzione Proposta</div>' +
+      '<table id="tabella-prodotti">' +
+      '<thead><tr><th>Sigla</th><th>Prodotto e motivazione</th><th>Area</th><th style="text-align:right">Anno 1</th><th style="text-align:right">Mensile</th><th class="no-print" style="width:30px"></th></tr></thead>' +
+      '<tbody>'+righe+'</tbody>' +
+      '<tfoot class="no-print"><tr><td colspan="6" style="padding:10px 12px;border-top:2px dashed #f0f0f0;background:#fafafa">' +
+      '<button onclick="apriPannello()" style="padding:6px 14px;background:#fff;border:1.5px dashed #E8001C;color:#E8001C;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">&#65291; Aggiungi servizio dal listino</button>' +
+      '</td></tr></tfoot></table>' +
+      '<div class="tot-box">' +
+      '<div class="tot-item"><div class="tot-lbl">Investimento Anno 1</div><div class="tot-val" id="tot-anno1">&euro; '+totAnno1.toLocaleString('it-IT')+'</div><div style="font-size:8pt;color:rgba(255,255,255,0.3)">IVA esclusa</div></div>' +
+      '<div style="width:1px;background:rgba(255,255,255,0.1);height:40px"></div>' +
+      '<div class="tot-item"><div class="tot-lbl">Canone Mensile</div><div class="tot-val" id="tot-mens">&euro; '+totMens+'<span style="font-size:11pt;color:rgba(255,255,255,0.4)">/mese</span></div></div>' +
+      '<div style="width:1px;background:rgba(255,255,255,0.1);height:40px"></div>' +
+      '<div class="tot-item"><div class="tot-lbl">Soluzioni incluse</div><div class="tot-val" id="tot-num">'+prodotti.length+'</div></div>' +
+      '</div>' +
+      '<div style="margin-top:20px;padding-top:16px;border-top:1px solid #eee;display:flex;justify-content:space-between;font-size:8.5pt;color:#bbb;flex-wrap:wrap;gap:10px">' +
+      '<div><strong style="color:#E8001C">Pagine Si! SpA</strong> &middot; P.zza San Giovanni Decollato 1, 05100 Terni &middot; paginesispa.it</div>' +
+      '<div>Prezzi al netto di IVA &middot; Proposta valida 30 giorni</div>' +
+      '</div>' +
+      '</div></div>' +
+      '<script>' +
+      'var LISTINO=' + JSON.stringify(PRODOTTI) + ';' +
+      'function rimuoviRiga(i){var r=document.getElementById("row-"+i);if(r){r.remove();aggiornaT();}}' +
+      'function aggiornaT(){var a=0,m=0,n=0;document.querySelectorAll("#tabella-prodotti tbody tr").forEach(function(t){a+=parseFloat(t.dataset.anno1||0);m+=parseFloat(t.dataset.mens||0);n++;});' +
+      'document.getElementById("tot-anno1").innerHTML="&euro; "+a.toLocaleString("it-IT");' +
+      'document.getElementById("tot-mens").innerHTML="&euro; "+m+"/mese";' +
+      'document.getElementById("tot-num").textContent=n;}' +
+      'var _sel=null;' +
+      'function apriPannello(){' +
+      'var cats={"Sito Web":["Si2A-PM","Si2RE-PM","Si2S-PM"],"Directory PagineSi.it":["WDSAL","WDSA"],"Google Maps":["GBP","GBPP","GBPAdv"],"Reputazione":["ISTQQ","ISTBS","ISTPS"],"Social Media":["SOC-SET","SOC-BAS","SOC-START","SOC-WEEK","SOC-FULL"],"SEO":["SIN","SMN","BLS10P"],"Google Ads":["ADW-E","ADW-S","SIADVLS","SIADVLG"],"Video":["VS1","VS4","VST30","VP"],"AI":["AI-ADLSET","AI-ADLABB"],"eCommerce":["EC-SMART","EC-GLOB"],"Marketing Automation":["Si4BLD","Si4BEN"]};' +
+      'var h="";for(var cat in cats){h+="<div style=\"margin-bottom:14px\"><div style=\"font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;margin-bottom:6px\">"+cat+"</div><div style=\"display:flex;flex-wrap:wrap;gap:4px\">";' +
+      'cats[cat].forEach(function(s){var p=LISTINO[s];if(!p)return;var pr=p.mens?"\u20ac"+p.mens+"/mese":(p.anno1?"\u20ac"+p.anno1+"/anno":"");' +
+      'var btn=document.createElement("button");btn.id="chip-"+s;btn.dataset.sigla=s;btn.onclick=function(){selSigla(this,this.dataset.sigla);};btn.style.cssText="padding:3px 9px;border-radius:12px;border:1.5px solid #e0e0e0;background:#fff;cursor:pointer;font-size:10px;color:#555;margin:2px";btn.innerHTML="<b style=\"font-family:monospace;color:#E8001C\">"+s+"</b> "+p.nome+" <span style=\"opacity:0.5;font-size:9px\">"+pr+"</span>";h+=btn.outerHTML;' +
+      '});h+="</div></div>";}' +
+      'document.getElementById("pan-body").innerHTML=h;document.getElementById("pannello").style.display="flex";}' +
+      'function selSigla(el,s){document.querySelectorAll("[id^=chip-]").forEach(function(e){e.style.background="#fff";e.style.borderColor="#e0e0e0";e.style.color="#555";});_sel=s;el.style.background="#E8001C";el.style.borderColor="#E8001C";el.style.color="#fff";document.getElementById("btn-ok").disabled=false;}' +
+      'function aggiungiS(){if(!_sel)return;var p=LISTINO[_sel];if(!p)return;' +
+      'var tb=document.querySelector("#tabella-prodotti tbody");var id="e"+Date.now();var tr=document.createElement("tr");' +
+      'tr.id="row-"+id;tr.dataset.anno1=p.anno1||0;tr.dataset.mens=p.mens||0;tr.style.borderBottom="1px solid #f0f0f0";' +
+      'tr.innerHTML="<td style=\"padding:10px 12px;font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600\">"+_sel+"</td>' +
+      '<td style=\"padding:10px 12px\"><div contenteditable=\"true\" style=\"font-weight:600;margin-bottom:2px\">"+p.nome+"</div><div contenteditable=\"true\" style=\"font-size:8.5pt;color:#777\">"+p.desc+"</div></td>' +
+      '<td style=\"padding:10px 12px;font-size:8.5pt\"><span style=\"background:#f5f5f5;padding:2px 8px;border-radius:4px\">"+p.cat+"</span></td>' +
+      '<td style=\"padding:10px 12px;text-align:right;font-weight:600\">"+(p.anno1?"\u20ac "+p.anno1.toLocaleString("it-IT"):"\u2014")+"</td>' +
+      '<td style=\"padding:10px 12px;text-align:right;font-weight:600\">"+(p.mens?"\u20ac "+p.mens+"/mese":"\u2014")+"</td>' +
+      '<td style=\"text-align:center\" class=\"no-print\"><button onclick=\"this.closest(String.fromCharCode(39)+\'tr\'+String.fromCharCode(39)).remove();aggiornaT()\" style=\"background:none;border:none;cursor:pointer;color:#ccc;font-size:14px;padding:4px 8px\">&#10005;</button></td>";' +
+      'tb.appendChild(tr);aggiornaT();chiudiPan();_sel=null;}' +
+      'function chiudiPan(){document.getElementById("pannello").style.display="none";}' +
+      '</script>' +
+      '</body></html>';
+    res.json({ html: html });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
