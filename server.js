@@ -245,6 +245,82 @@ app.post('/analisi', async function(req, res) {
       });
     }
 
+    // Agente Claude: analisi strategica basata sui dati reali
+    var analisiStrategica = '';
+    try {
+      var datiRaccolti = {
+        nome: nome,
+        categoria: categoria,
+        citta: citta,
+        sito: web || 'nessun sito',
+        rating: rating || 'N/D',
+        n_recensioni: nRating,
+        posizione_google: seo && seo.posizione ? '#' + seo.posizione : 'non trovato',
+        keyword_google: (seo && seo.keyword) || (categoria + ' ' + citta),
+        posizione_maps: posizioneMapLead ? '#' + posizioneMapLead : 'non trovato',
+        facebook: social.facebook ? 'presente' + (social.facebook_follower ? ' (' + social.facebook_follower + ')' : '') : 'assente',
+        instagram: social.instagram ? 'presente' + (social.instagram_follower ? ' (' + social.instagram_follower + ')' : '') : 'assente',
+        competitor: competitor.map(function(c) {
+          return c.nome + ' | Maps #' + c.posizione_maps + (c.posizione_serp ? ' | Google #' + c.posizione_serp : ' | Google: non trovato') + ' | Rating: ' + (c.rating || 'N/D') + ' | Sito: ' + (c.ha_sito ? 'si' : 'no');
+        }).join(', ')
+      };
+
+      var promptStrategia = [
+        'Sei un senior digital marketing strategist italiano specializzato in PMI locali.',
+        'Analizza questi dati reali di un attivita locale e produci un analisi strategica concreta',
+        'con obiettivi tangibili e raggiungibili attraverso i servizi di Pagine Si!.',
+        '',
+        'DATI REALI RACCOLTI:',
+        'Attivita: ' + datiRaccolti.nome + ' (' + datiRaccolti.categoria + ' a ' + datiRaccolti.citta + ')',
+        'Sito web: ' + datiRaccolti.sito,
+        'Rating Google: ' + datiRaccolti.rating + '/5 con ' + datiRaccolti.n_recensioni + ' recensioni',
+        'Posizione Google organico per "' + datiRaccolti.keyword_google + '": ' + datiRaccolti.posizione_google,
+        'Posizione Google Maps: ' + datiRaccolti.posizione_maps,
+        'Facebook: ' + datiRaccolti.facebook,
+        'Instagram: ' + datiRaccolti.instagram,
+        'Competitor principali:',
+        datiRaccolti.competitor || 'nessuno trovato',
+        '',
+        'SERVIZI PAGINE SI! DISPONIBILI:',
+        '- Sito web professionale (Si!2Site): aumenta visibilita organica Google',
+        '- Google Business Profile ottimizzato (GBP): migliora posizione Maps',
+        '- Gestione social media FB+IG: post e reels professionali settimanali',
+        '- SEO locale: posizionamento nelle prime posizioni Google per keyword locali',
+        '- Gestione recensioni (Instatrust): raccolta automatica e gestione reputation',
+        '- Google Ads locale: visibilita immediata nelle ricerche a pagamento',
+        '',
+        'PRODUCI una analisi in italiano con questi 5 punti:',
+        '1. SITUAZIONE ATTUALE: 2-3 righe sui gap piu critici basati sui dati reali',
+        '2. OBIETTIVI A 90 GIORNI: 3 obiettivi specifici con numeri reali (es: passare da ' + datiRaccolti.posizione_maps + ' a top 3 su Maps, raccogliere 20 nuove recensioni)',
+        '3. OBIETTIVI A 6 MESI: 3 obiettivi con proiezioni concrete e numeri',
+        '4. STRATEGIA SOCIAL: almeno 2 punti specifici su come usare Reels e contenuti social per questa categoria di business. Includi dati reali di mercato: i Reels ottengono mediamente 3x piu reach dei post statici, le attivita locali con 3+ reels/settimana aumentano le visite in negozio del 25-40%',
+        '5. PRIORITA DI INTERVENTO: i 3 servizi Pagine Si! piu urgenti con motivazione basata sui dati raccolti',
+        '',
+        'Sii specifico e usa i numeri dai dati forniti. Massimo 400 parole. Usa titoli in grassetto con **Titolo**.'
+      ].join('\n');
+
+
+      var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 800,
+          messages: [{ role: 'user', content: promptStrategia }]
+        })
+      });
+      var aiData = await aiResp.json();
+      if (aiData.content && aiData.content[0] && aiData.content[0].text) {
+        var testo = aiData.content[0].text
+          .split('**').map(function(t,i){ return i%2===1 ? '<strong>'+t+'</strong>' : t; }).join('')
+          .split('\n\n').join('</p><p style="margin-bottom:10px">')
+          .split('\n').join('<br>');
+        analisiStrategica = '<p style="margin-bottom:10px">' + testo + '</p>';
+      }
+    } catch(e) {
+      analisiStrategica = '<p style="color:#aaa;font-size:9pt">Analisi strategica non disponibile</p>';
+    }
+
     // Costruisci HTML
     var secStyle = 'font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C';
     var boxStyle = 'background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:16px 18px;margin-bottom:24px';
@@ -412,6 +488,18 @@ app.post('/analisi', async function(req, res) {
     }
     body += '</div>';
 
+    // Sezione analisi strategica
+    var sezioneStrategia = '';
+    if (analisiStrategica) {
+      sezioneStrategia += '<div style="margin-bottom:28px">';
+      sezioneStrategia += '<div style="' + secStyle + '">Analisi Strategica e Obiettivi</div>';
+      sezioneStrategia += '<div style="background:#fff;border:1.5px solid #E8001C;border-radius:10px;padding:20px 22px;font-size:9.5pt;color:#1a1a1a;line-height:1.7">';
+      sezioneStrategia += analisiStrategica;
+      sezioneStrategia += '</div>';
+      sezioneStrategia += '<div style="font-size:8pt;color:#aaa;margin-top:8px">Analisi generata da AI sulla base dei dati reali raccolti - Lead Agent by Pagine Si!</div>';
+      sezioneStrategia += '</div>';
+    }
+
     // HTML pagina completa
     var oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
     var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -445,6 +533,7 @@ app.post('/analisi', async function(req, res) {
       '<button class="btn-close" onclick="window.close()">Chiudi</button>' +
       '</div>' +
       body +
+      sezioneStrategia +
       '</div></div></body></html>';
 
     res.json({ html: html });
