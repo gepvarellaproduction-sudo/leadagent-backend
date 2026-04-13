@@ -307,7 +307,7 @@ app.post('/analisi', async function(req, res) {
       var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 3000, messages: [{ role: 'user', content: prompt }] })
       });
       var aiData = await aiResp.json();
       if (aiData.content && aiData.content[0] && aiData.content[0].text) {
@@ -403,15 +403,21 @@ app.post('/analisi', async function(req, res) {
     body += '</div></div></div></div>';
 
     // ANALISI STRATEGICA - skeleton caricato in background
+    // Tasto proposta PRIMA dell'analisi strategica - cos il codice non si mescola mai
+    var htmlTasto =
+      '<div style="margin-top:24px;padding:20px 0;text-align:center" class="no-print" id="zona-proposta">'+
+      '<button id="btn-prop" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>'+
+      '<div style="font-size:9pt;color:#aaa;margin-top:8px">Generata leggendo l\'analisi appena prodotta</div>'+
+      '<div id="prop-cont" style="margin-top:16px"></div>'+
+      '</div>';
+
     if (strategia) {
       body += '<div style="margin-bottom:24px"><div style="'+sec+'">Analisi Strategica e Obiettivi</div><div style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;font-size:9.5pt;color:#1a1a1a;line-height:1.7"><p style="margin-bottom:10px">'+strategia+'</p></div></div>';
     }
 
     // Tasto proposta - genera al click leggendo i dati analisi
     var tastoP =
-      '<div style="margin-top:32px;padding:20px 0;text-align:center" class="no-print">'+
-      '<button id="btn-prop" onclick="var me=this;me.disabled=true;me.textContent=\'Generazione...\';var cont=document.getElementById(\'prop-cont\');if(cont)cont.innerHTML=\'<div style=\\"padding:32px;text-align:center;color:#aaa\\">&#8987; Generazione proposta in corso...</div>\';fetch(\'https://leadagent-backend.onrender.com/proposal\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({lead:L,consulente:\'Consulente Pagine Si!\'})}).then(function(r){return r.json();}).then(function(d){me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';if(d.html&&cont){var ifr=document.createElement(\'iframe\');ifr.style.cssText=\'width:100%;border:none;border-radius:8px;min-height:700px\';ifr.srcdoc=d.html;ifr.onload=function(){try{ifr.style.height=(ifr.contentDocument.body.scrollHeight+40)+\'px\';}catch(e){}};cont.innerHTML=\'\';cont.appendChild(ifr);setTimeout(function(){cont.scrollIntoView({behavior:\'smooth\'});},200);}}).catch(function(e){if(cont)cont.innerHTML=\'\';me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';})" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>'+
-      '<div style="font-size:9pt;color:#aaa;margin-top:8px">Generata leggendo l\'analisi appena prodotta</div></div>'+
+
       '<div id="prop-cont" style="margin-top:0"></div>';
 
     // Payload per analisi strategica (caricata dopo dal JS della pagina)
@@ -451,7 +457,7 @@ app.post('/analisi', async function(req, res) {
       '<button class="btn bgy" onclick="window.close()">Chiudi</button>'+
       '</div>'+
       body+
-      tastoP+
+      htmlTasto+
       '</div></div>'+
       '<script>'+
       'var B="https://leadagent-backend.onrender.com";'+
@@ -482,6 +488,25 @@ app.post('/analisi', async function(req, res) {
       '  .then(function(d){if(d.html&&tab&&!tab.closed){tab.document.open();tab.document.write(d.html);tab.document.close();}if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}})'+
       '  .catch(function(e){if(tab&&!tab.closed)tab.close();if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}});'+
       '}'+
+      'function genProposta(){'+
+      '  var me=document.getElementById("btn-prop");'+
+      '  me.disabled=true;me.textContent="Generazione...";'+
+      '  var cont=document.getElementById("prop-cont");'+
+      '  var ldiv=document.createElement("div");ldiv.style.cssText="padding:24px;text-align:center;color:#aaa";ldiv.innerHTML="&#8987; Generazione proposta...";'+
+      '  cont.innerHTML="";cont.appendChild(ldiv);'+
+      '  fetch(B+"/proposal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L,consulente:"Consulente Pagine Si!"})})'+
+      '  .then(function(r){return r.json();})'+
+      '  .then(function(d){'+
+      '    me.disabled=false;me.textContent="Genera Proposta Commerciale";'+
+      '    if(d.html&&cont){'+
+      '      var ifr=document.createElement("iframe");'+
+      '      ifr.style.cssText="width:100%;border:none;border-radius:8px;min-height:700px";'+
+      '      ifr.srcdoc=d.html;'+
+      '      ifr.onload=function(){try{ifr.style.height=(ifr.contentDocument.body.scrollHeight+40)+"px";}catch(e){}};'+
+      '      cont.innerHTML="";cont.appendChild(ifr);'+
+      '      setTimeout(function(){cont.scrollIntoView({behavior:"smooth"});},200);}})'+
+      '  .catch(function(){me.disabled=false;me.textContent="Genera Proposta Commerciale";});}'+
+      'document.getElementById("btn-prop").onclick=genProposta;'+
       '</script></body></html>';
 
     res.json({ html: html });
@@ -510,7 +535,7 @@ app.post('/analisi-strategica', async function(req, res) {
     var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] })
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 3000, messages: [{ role: 'user', content: prompt }] })
     });
     var aiData = await aiResp.json();
     if (aiData.content && aiData.content[0] && aiData.content[0].text) {
