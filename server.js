@@ -184,22 +184,41 @@ async function cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems) {
   return out;
 }
 
-function calcolaAI(web, social, nRating, rating, seo) {
+async function calcolaAI(web, social, nRating, rating, seo, nome, citta) {
   var score = 0, det = [];
-  if (nRating >= 100) { score += 25; det.push('Google Maps: ottimo ('+nRating+' recensioni)'); }
-  else if (nRating >= 30) { score += 15; det.push('Google Maps: buono ('+nRating+' recensioni)'); }
-  else if (nRating > 0) { score += 8; det.push('Google Maps: debole ('+nRating+' recensioni)'); }
-  else { det.push('Google Maps: assente'); }
-  if (rating >= 4.5) score += 15; else if (rating >= 4.0) score += 10; else if (rating >= 3.5) score += 5;
+  // Google Maps
+  if (nRating >= 100) { score += 20; det.push({ ok: true, label: 'Google Maps ('+nRating+' rec.)' }); }
+  else if (nRating >= 30) { score += 12; det.push({ ok: true, label: 'Google Maps ('+nRating+' rec.)' }); }
+  else if (nRating > 0) { score += 5; det.push({ ok: false, label: 'Google Maps (poche rec.)' }); }
+  else { det.push({ ok: false, label: 'Google Maps: assente' }); }
+  // Rating bonus
+  if (rating >= 4.5) score += 10; else if (rating >= 4.0) score += 6; else if (rating >= 3.5) score += 3;
+  // Sito web
   if (web) {
-    if (seo && seo.posizione && seo.posizione <= 10) { score += 20; det.push('Sito: prima pagina Google'); }
-    else if (seo && seo.posizione && seo.posizione <= 30) { score += 12; det.push('Sito: pagine 2-3 Google'); }
-    else { score += 6; det.push('Sito: presente ma non indicizzato'); }
-  } else { det.push('Sito web: assente'); }
-  if (social.facebook && social.instagram) { score += 20; det.push('Social: FB + IG presenti'); }
-  else if (social.facebook || social.instagram) { score += 10; det.push('Social: un profilo presente'); }
-  else { det.push('Social: assenti'); }
-  if (score >= 40) score += 5;
+    if (seo && seo.posizione && seo.posizione <= 10) { score += 18; det.push({ ok: true, label: 'Sito web (pag. 1 Google)' }); }
+    else if (seo && seo.posizione && seo.posizione <= 30) { score += 10; det.push({ ok: true, label: 'Sito web (pag. 2-3 Google)' }); }
+    else { score += 5; det.push({ ok: false, label: 'Sito web (non indicizzato)' }); }
+  } else { det.push({ ok: false, label: 'Sito web: assente' }); }
+  // Social
+  if (social.facebook && social.instagram) { score += 15; det.push({ ok: true, label: 'Facebook + Instagram' }); }
+  else if (social.facebook) { score += 8; det.push({ ok: true, label: 'Facebook presente' }); det.push({ ok: false, label: 'Instagram: assente' }); }
+  else if (social.instagram) { score += 8; det.push({ ok: true, label: 'Instagram presente' }); det.push({ ok: false, label: 'Facebook: assente' }); }
+  else { det.push({ ok: false, label: 'Social: assenti' }); }
+  // Cerca TripAdvisor e Pagine Gialle
+  try {
+    var q = await dfsSearch(nome + ' ' + citta + ' tripadvisor OR paginegialle', 10);
+    var hasTa = q.some(function(i){ return (i.domain||'').includes('tripadvisor'); });
+    var hasPg = q.some(function(i){ return (i.domain||'').includes('paginegialle'); });
+    if (hasTa) { score += 8; det.push({ ok: true, label: 'TripAdvisor' }); }
+    else { det.push({ ok: false, label: 'TripAdvisor: non trovato' }); }
+    if (hasPg) { score += 5; det.push({ ok: true, label: 'Pagine Gialle' }); }
+    else { det.push({ ok: false, label: 'Pagine Gialle: non trovato' }); }
+    // Stampa locale
+    var q2 = await dfsSearch(nome + ' ' + citta + ' -facebook -instagram -tripadvisor', 10);
+    var hasNews = q2.some(function(i){ var d=(i.domain||'').toLowerCase(); return !['facebook','instagram','google','maps','pagine','tripadvisor','yelp'].some(function(x){return d.includes(x);}); });
+    if (hasNews) { score += 4; det.push({ ok: true, label: 'Stampa locale online' }); }
+    else { det.push({ ok: false, label: 'Stampa locale: non trovato' }); }
+  } catch(e) {}
   score = Math.min(score, 100);
   return { score: score, livello: score>=70?'ALTA':score>=40?'MEDIA':'BASSA', colore: score>=70?'#2e7d32':score>=40?'#e65100':'#c62828', dettagli: det };
 }
@@ -299,7 +318,7 @@ app.post('/analisi', async function(req, res) {
       }
     } catch(e) {}
 
-    var ai = calcolaAI(web, social, nRating, rating, seo);
+    var ai = await calcolaAI(web, social, nRating, rating, seo, nome, citta);
     var oggi = new Date().toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
     var sec = 'font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C';
     var box = 'background:#f9f9f9;border:1px solid #eee;border-radius:8px;padding:14px 18px;margin-bottom:8px';
@@ -380,7 +399,7 @@ app.post('/analisi', async function(req, res) {
     body += '<div style="margin-bottom:24px"><div style="'+sec+'">Visibilita su AI (Gemini, ChatGPT)</div><div style="display:flex;gap:14px;flex-wrap:wrap">';
     body += '<div style="'+box+';flex-shrink:0;text-align:center;min-width:100px"><div style="font-size:3rem;font-weight:800;color:'+ai.colore+'">'+ai.score+'</div><div style="font-size:8.5pt;color:'+ai.colore+';font-weight:700;margin-top:4px">'+ai.livello+'</div><div style="font-size:8pt;color:#aaa">su 100</div></div>';
     body += '<div style="flex:1;'+box+'"><div style="font-size:9pt;color:#555;margin-bottom:8px">Le AI generative (Gemini, ChatGPT) citano le attivita presenti su fonti che scansionano: Google Maps, sito web, social, stampa locale. Piu fonti presenti = piu probabilita di essere citati per "'+categoria+' a '+citta+'".</div><div style="display:flex;flex-direction:column;gap:4px">';
-    ai.dettagli.forEach(function(d){ var isP=d.indexOf('ottimo')>-1||d.indexOf('buono')>-1||d.indexOf('prima')>-1||d.indexOf('presenti')>-1; body += '<div style="font-size:9pt;color:'+(isP?'#2e7d32':'#c62828')+'">'+(isP?'+ ':'- ')+d+'</div>'; });
+    ai.dettagli.forEach(function(d){ body += '<div style="font-size:9pt;color:'+(d.ok?'#2e7d32':'#c62828')+'">'+(d.ok?'&#10003; ':'&#10007; ')+d.label+'</div>'; });
     body += '</div></div></div></div>';
 
     // ANALISI STRATEGICA - skeleton caricato in background
@@ -391,9 +410,9 @@ app.post('/analisi', async function(req, res) {
     // Tasto proposta - genera al click leggendo i dati analisi
     var tastoP =
       '<div style="margin-top:32px;padding:20px 0;text-align:center" class="no-print">'+
-      '<button id="btn-prop" onclick="var me=this;me.disabled=true;me.textContent=\'Generazione...\';var tab=window.open(\'about:blank\',\'_blank\');fetch(\'https://leadagent-backend.onrender.com/proposal\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({lead:L,consulente:\'Consulente Pagine Si!\'})}).then(function(r){return r.json();}).then(function(d){me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';if(d.html&&tab&&!tab.closed){tab.document.open();tab.document.write(d.html);tab.document.close();}else if(tab&&!tab.closed){tab.close();}}).catch(function(){me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';if(tab&&!tab.closed)tab.close();})" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>'+
+      '<button id="btn-prop" onclick="var me=this;me.disabled=true;me.textContent=\'Generazione...\';var cont=document.getElementById(\'prop-cont\');if(cont)cont.innerHTML=\'<div style=\\"padding:32px;text-align:center;color:#aaa\\">&#8987; Generazione proposta in corso...</div>\';fetch(\'https://leadagent-backend.onrender.com/proposal\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({lead:L,consulente:\'Consulente Pagine Si!\'})}).then(function(r){return r.json();}).then(function(d){me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';if(d.html&&cont){var ifr=document.createElement(\'iframe\');ifr.style.cssText=\'width:100%;border:none;border-radius:8px;min-height:700px\';ifr.srcdoc=d.html;ifr.onload=function(){try{ifr.style.height=(ifr.contentDocument.body.scrollHeight+40)+\'px\';}catch(e){}};cont.innerHTML=\'\';cont.appendChild(ifr);setTimeout(function(){cont.scrollIntoView({behavior:\'smooth\'});},200);}}).catch(function(e){if(cont)cont.innerHTML=\'\';me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';})" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>'+
       '<div style="font-size:9pt;color:#aaa;margin-top:8px">Generata leggendo l\'analisi appena prodotta</div></div>'+
-      '<div id="prop-container"></div>';
+      '<div id="prop-cont" style="margin-top:0"></div>';
 
     // Payload per analisi strategica (caricata dopo dal JS della pagina)
     var sp = JSON.stringify({
