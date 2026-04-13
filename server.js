@@ -439,7 +439,7 @@ app.post('/analisi', async function(req, res) {
     var leadJson = JSON.stringify({ nome:nome, indirizzo:lead.indirizzo||'', web:web||null, telefono:lead.telefono||null, tipi:lead.tipi||[], rating:rating, nRating:nRating, descrizione:lead.descrizione||null, placeId:lead.placeId||null, categoria:categoria, citta:citta, logoUrl:lead.logoUrl||null });
     var lp = JSON.stringify(require('./proposal').PRODOTTI);
 
-    var css = '*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}.pg{max-width:900px;margin:24px auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)}.hdr{background:#111;padding:20px 28px;display:flex;justify-content:space-between;align-items:center}.t{font-size:13pt;font-weight:700;color:white}.s{font-size:9pt;color:rgba(255,255,255,0.5);margin-top:2px}.d{font-size:8.5pt;color:rgba(255,255,255,0.4)}.bd{padding:18px 26px 26px}.az{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;padding:14px 16px;background:#f9f9f9;border-radius:8px;border:1px solid #eee}.btn{padding:9px 18px;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer}.br{background:#E8001C;color:white}.bg{background:#2e7d32;color:white}.bgy{background:#f0f0f0;color:#555}@media print{.az,.no-print{display:none}body{background:white}.pg{box-shadow:none;border-radius:0;margin:0}}';
+    var css = '*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#f4f4f4;color:#1a1a1a}.pg{max-width:900px;margin:24px auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)}.hdr{background:#111;padding:20px 28px;display:flex;justify-content:space-between;align-items:center}.t{font-size:13pt;font-weight:700;color:white}.s{font-size:9pt;color:rgba(255,255,255,0.5);margin-top:2px}.d{font-size:8.5pt;color:rgba(255,255,255,0.4)}.bd{padding:18px 26px 26px}.az{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;padding:14px 16px;background:#f9f9f9;border-radius:8px;border:1px solid #eee}.btn{padding:9px 18px;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer}.br{background:#E8001C;color:white}.bg{background:#2e7d32;color:white}.bgy{background:#f0f0f0;color:#555}@media print{.az,.no-print{display:none}body{background:white}.pg{box-shadow:none;border-radius:0;margin:0}#zona-proposta>div:first-child{display:none}button{display:none!important}}';
 
     var html = '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Analisi - '+nome.replace(/[<>]/g,'')+'</title><style>'+css+'</style></head><body>'+
       '<div class="pg"><div class="hdr"><div><div class="t">Analisi Digitale Prevendita</div><div class="s">Lead Agent - Pagine Si!</div></div><div class="d">'+oggi+'</div></div>'+
@@ -492,19 +492,40 @@ app.post('/analisi', async function(req, res) {
       '  var me=document.getElementById("btn-prop");'+
       '  me.disabled=true;me.textContent="Generazione...";'+
       '  var cont=document.getElementById("prop-cont");'+
-      '  var ldiv=document.createElement("div");ldiv.style.cssText="padding:24px;text-align:center;color:#aaa";ldiv.innerHTML="&#8987; Generazione proposta...";'+
+      '  var ldiv=document.createElement("div");'+
+      '  ldiv.style.cssText="padding:24px;text-align:center;color:#aaa";'+
+      '  ldiv.innerHTML="&#8987; Generazione proposta...";'+
       '  cont.innerHTML="";cont.appendChild(ldiv);'+
       '  fetch(B+"/proposal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L,consulente:"Consulente Pagine Si!"})})'+
       '  .then(function(r){return r.json();})'+
       '  .then(function(d){'+
       '    me.disabled=false;me.textContent="Genera Proposta Commerciale";'+
       '    if(d.html&&cont){'+
-      '      var ifr=document.createElement("iframe");'+
-      '      ifr.style.cssText="width:100%;border:none;border-radius:8px;min-height:700px";'+
-      '      ifr.srcdoc=d.html;'+
-      '      ifr.onload=function(){try{ifr.style.height=(ifr.contentDocument.body.scrollHeight+40)+"px";}catch(e){}};'+
-      '      cont.innerHTML="";cont.appendChild(ifr);'+
-      '      setTimeout(function(){cont.scrollIntoView({behavior:"smooth"});},200);}})'+
+      '      cont.innerHTML="";'+
+      '      var parser=new DOMParser();'+
+      '      var doc=parser.parseFromString(d.html,"text/html");'+
+      '      var wrap=document.createElement("div");'+
+      '      wrap.style.cssText="border:2px solid #E8001C;border-radius:12px;overflow:hidden;margin-top:16px";'+
+      '      var inner=document.createElement("div");'+
+      '      inner.style.cssText="padding:0";'+
+      '      var styleEl=document.createElement("style");'+
+      '      var propStyles=doc.querySelectorAll("style");'+
+      '      propStyles.forEach(function(s){styleEl.textContent+=s.textContent;});'+
+      '      wrap.appendChild(styleEl);'+
+      '      inner.innerHTML=doc.body.innerHTML;'+
+      '      wrap.appendChild(inner);'+
+      '      cont.appendChild(wrap);'+
+      '      if(!window._propScriptsLoaded){window._propScriptsLoaded=true;'+
+      '        var scripts=doc.querySelectorAll("script");'+
+      '        scripts.forEach(function(s){'+
+      '          var ns=document.createElement("script");'+
+      '          ns.textContent=s.textContent;'+
+      '          document.body.appendChild(ns);'+
+      '        });'+
+      '      }'+
+      '      setTimeout(function(){cont.scrollIntoView({behavior:"smooth"});},200);'+
+      '    }'+
+      '  })'+
       '  .catch(function(){me.disabled=false;me.textContent="Genera Proposta Commerciale";});}'+
       'document.getElementById("btn-prop").onclick=genProposta;'+
       '</script></body></html>';
