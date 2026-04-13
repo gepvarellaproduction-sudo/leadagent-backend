@@ -502,27 +502,21 @@ app.post('/analisi', async function(req, res) {
       '    me.disabled=false;me.textContent="Genera Proposta Commerciale";'+
       '    if(d.html&&cont){'+
       '      cont.innerHTML="";'+
-      '      var parser=new DOMParser();'+
-      '      var doc=parser.parseFromString(d.html,"text/html");'+
-      '      var wrap=document.createElement("div");'+
-      '      wrap.style.cssText="border:2px solid #E8001C;border-radius:12px;overflow:hidden;margin-top:16px";'+
-      '      var inner=document.createElement("div");'+
-      '      inner.style.cssText="padding:0";'+
-      '      var styleEl=document.createElement("style");'+
-      '      var propStyles=doc.querySelectorAll("style");'+
-      '      propStyles.forEach(function(s){styleEl.textContent+=s.textContent;});'+
-      '      wrap.appendChild(styleEl);'+
-      '      inner.innerHTML=doc.body.innerHTML;'+
-      '      wrap.appendChild(inner);'+
-      '      cont.appendChild(wrap);'+
-      '      if(!window._propScriptsLoaded){window._propScriptsLoaded=true;'+
-      '        var scripts=doc.querySelectorAll("script");'+
-      '        scripts.forEach(function(s){'+
-      '          var ns=document.createElement("script");'+
-      '          ns.textContent=s.textContent;'+
-      '          document.body.appendChild(ns);'+
-      '        });'+
-      '      }'+
+      '      var ifr=document.createElement("iframe");'+
+      '      ifr.setAttribute("sandbox","allow-scripts allow-same-origin allow-modals");'+
+      '      ifr.style.cssText="width:100%;border:2px solid #E8001C;border-radius:12px;margin-top:16px;min-height:600px";'+
+      '      ifr.srcdoc=d.html;'+
+      '      ifr.onload=function(){'+
+      '        try{ifr.style.height=(ifr.contentDocument.body.scrollHeight+40)+"px";}catch(e){}'+
+      '      };'+
+      '      cont.appendChild(ifr);'+
+      '      var btnStampa=document.createElement("button");'+
+      '      btnStampa.textContent="Stampa / Esporta PDF (Analisi + Proposta)";'+
+      '      btnStampa.style.cssText="margin-top:12px;padding:10px 24px;background:#111;color:white;border:none;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer";'+
+      '      btnStampa.onclick=function(){'+
+      '        try{ifr.contentWindow.print();}catch(e){window.print();}'+
+      '      };'+
+      '      cont.appendChild(btnStampa);'+
       '      setTimeout(function(){cont.scrollIntoView({behavior:"smooth"});},200);'+
       '    }'+
       '  })'+
