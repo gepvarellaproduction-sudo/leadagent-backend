@@ -473,7 +473,9 @@ app.post('/analisi', async function(req, res) {
           '<div style="font-size:8pt;color:#aaa;font-style:italic" contenteditable="true">'+p.motivazione+'</div></td>' +
           '<td style="padding:9px 11px"><span style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt">'+p.cat+'</span></td>' +
           '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.anno1?'&euro; '+p.anno1.toLocaleString('it-IT'):'&mdash;')+'</td>' +
-          '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td></tr>';
+          '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td>' +
+          '<td style="padding:9px 11px;text-align:center;width:28px"><button onclick="rimuoviRiga(this)" style="background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:3px 6px" title="Rimuovi">&#10005;</button></td>' +
+          '</tr>';
       }).join('');
 
       propostaHtml =
@@ -484,21 +486,70 @@ app.post('/analisi', async function(req, res) {
         '<span>Consulente: <strong contenteditable="true" style="color:#1a1a1a">Consulente Pagine Si!</strong></span>' +
         '<span>Data: '+oggiP+'</span><span>Valida fino: '+scadP+'</span></div>' +
         '<div style="background:#fff9e6;border:1px solid #ffe082;border-radius:7px;padding:9px 14px;margin-bottom:14px;font-size:9.5pt;color:#795548">Clicca sui testi per modificarli</div>' +
-        '<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
+        '<table id="prop-tbl" style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
         '<thead><tr style="background:#111;color:white">' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Sigla</th>' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Prodotto</th>' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Area</th>' +
         '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Anno 1</th>' +
-        '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Mensile</th></tr></thead>' +
+        '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Mensile</th>' +
+        '<th style="width:28px"></th></tr></thead>' +
         '<tbody>'+righe+'</tbody></table>' +
         '<div style="background:#111;color:white;border-radius:8px;padding:16px 22px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:12px">' +
         '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Investimento Anno 1</div>' +
-        '<div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; '+tot1.toLocaleString('it-IT')+'</div>' +
+        '<div style="font-size:18pt;font-weight:800;color:#E8001C" id="prop-tot1">&euro; '+tot1.toLocaleString('it-IT')+'</div>' +
         '<div style="font-size:8pt;color:rgba(255,255,255,0.3)">IVA esclusa</div></div>' +
         '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Canone Mensile</div>' +
-        '<div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; '+totM+'<span style="font-size:10pt;color:rgba(255,255,255,0.4)">/mese</span></div></div></div>' +
+        '<div style="font-size:18pt;font-weight:800;color:#E8001C" id="prop-totm">&euro; '+totM+'<span style="font-size:10pt;color:rgba(255,255,255,0.4)">/mese</span></div></div></div>' +
         '<div style="font-size:8.5pt;color:#bbb;text-align:center;margin-bottom:32px">Pagine Si! SpA &middot; paginesispa.it &middot; Prezzi IVA esclusa</div>' +
+        '<tfoot><tr><td colspan="6" style="padding:8px 11px;border-top:2px dashed #f0f0f0;background:#fafafa">' +
+        '<button onclick="apriListinoProp()" style="padding:5px 12px;background:#fff;border:1.5px dashed #E8001C;color:#E8001C;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer">+ Aggiungi dal listino</button>' +
+        '</td></tr></tfoot>' +
+        '</table>' +
+        '<div id="prop-listino-overlay" onclick="if(event.target===this)chiudiListinoProp()" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:9999;align-items:center;justify-content:center">' +
+        '<div style="background:#fff;border-radius:14px;width:660px;max-width:95vw;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.2)">' +
+        '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between"><div style="font-size:13px;font-weight:700">Aggiungi servizio</div><button onclick="chiudiListinoProp()" style="width:26px;height:26px;border-radius:50%;border:none;background:#f0f0f0;cursor:pointer">&#10005;</button></div>' +
+        '<div id="prop-listino-body" style="overflow-y:auto;padding:16px 18px;flex:1"></div>' +
+        '<div style="padding:10px 18px;border-top:1px solid #eee;background:#f9f9f9;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#aaa">Seleziona un servizio</span><button id="prop-btn-add" onclick="aggiungiDaListinoProp()" disabled style="padding:7px 16px;background:#E8001C;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;opacity:0.4">Aggiungi</button></div>' +
+        '</div></div>' +
+        '<script>' +
+        'var _PL='+JSON.stringify(PRODOTTI)+';var _PS=null;' +
+        'function rimuoviRiga(btn){var tr=btn.closest("tr");if(tr){tr.remove();aggiornaTotProp();}}' +
+        'function aggiornaTotProp(){var a=0,m=0;document.querySelectorAll("#prop-tbl tbody tr").forEach(function(tr){a+=parseFloat(tr.dataset.a1||0);m+=parseFloat(tr.dataset.mn||0);});var t1=document.getElementById("prop-tot1");var tm=document.getElementById("prop-totm");if(t1)t1.textContent=a.toLocaleString("it-IT");if(tm)tm.textContent=m;}' +
+        'function apriListinoProp(){' +
+        '  var cats={"Sito Web":["Si2A-PM","Si2RE-PM","Si2S-PM","Si2VN-PM"],"Directory":["WDSAL","WDSA"],"Google Maps":["GBP","GBPP","GBPAdv"],"Reputazione":["ISTQQ","ISTBS","ISTPS"],"Social":["SOC-SET","SOC-BAS","SOC-START","SOC-WEEK","SOC-FULL"],"SEO":["SIN","SMN","BLS10P"],"Google Ads":["ADW-E","ADW-S","SIADVLS","SIADVLG"],"Video":["VS1","VS4","VST30","VP"],"AI":["AI-ADLSET","AI-ADLABB"],"eCommerce":["EC-SMART","EC-GLOB"],"Automation":["Si4BLD","Si4BEN"]};' +
+        '  var body=document.getElementById("prop-listino-body");body.innerHTML="";' +
+        '  for(var cat in cats){' +
+        '    var wrap=document.createElement("div");wrap.style.marginBottom="14px";' +
+        '    var lbl=document.createElement("div");lbl.style.cssText="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;margin-bottom:6px";lbl.textContent=cat;wrap.appendChild(lbl);' +
+        '    var row=document.createElement("div");row.style.cssText="display:flex;flex-wrap:wrap;gap:4px";' +
+        '    cats[cat].forEach(function(s){var p=_PL[s];if(!p)return;var pr=p.mens?("\u20ac"+p.mens+"/mese"):(p.anno1?("\u20ac"+p.anno1+"/anno"):"");var btn=document.createElement("button");btn.id="plc-"+s;btn.dataset.sigla=s;btn.onclick=function(){selPL(this,this.dataset.sigla);};btn.style.cssText="padding:3px 9px;border-radius:12px;border:1.5px solid #e0e0e0;background:#fff;cursor:pointer;font-size:10px;color:#555;margin:2px";var b=document.createElement("b");b.style.cssText="font-family:monospace;color:#E8001C";b.textContent=s;btn.appendChild(b);btn.appendChild(document.createTextNode(" "+p.nome+" "+pr));row.appendChild(btn);});' +
+        '    wrap.appendChild(row);body.appendChild(wrap);' +
+        '  }' +
+        '  document.getElementById("prop-listino-overlay").style.display="flex";' +
+        '}' +
+        'function selPL(el,s){document.querySelectorAll("[id^=plc-]").forEach(function(e){e.style.background="#fff";e.style.borderColor="#e0e0e0";e.style.color="#555";});_PS=s;el.style.background="#E8001C";el.style.borderColor="#E8001C";el.style.color="#fff";var b=document.getElementById("prop-btn-add");if(b){b.disabled=false;b.style.opacity="1";}}' +
+        'function aggiungiDaListinoProp(){' +
+        '  if(!_PS)return;var p=_PL[_PS];if(!p)return;' +
+        '  var tb=document.querySelector("#prop-tbl tbody");' +
+        '  var tr=document.createElement("tr");tr.dataset.a1=p.anno1||0;tr.dataset.mn=p.mens||0;tr.style.borderBottom="1px solid #f0f0f0";' +
+        '  function td(style,content){var c=document.createElement("td");c.style.cssText=style;if(typeof content==="string")c.innerHTML=content;else c.appendChild(content);return c;}' +
+        '  var siglaEl=document.createElement("div");siglaEl.style.cssText="font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600";siglaEl.textContent=_PS;' +
+        '  var nomeEl=document.createElement("div");nomeEl.contentEditable="true";nomeEl.style.cssText="font-weight:600;margin-bottom:2px";nomeEl.textContent=p.nome;' +
+        '  var descEl=document.createElement("div");descEl.contentEditable="true";descEl.style.cssText="font-size:8.5pt;color:#777";descEl.textContent=p.desc;' +
+        '  var cell2=document.createElement("td");cell2.style.padding="9px 11px";cell2.appendChild(nomeEl);cell2.appendChild(descEl);' +
+        '  var badge=document.createElement("span");badge.style.cssText="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt";badge.textContent=p.cat;' +
+        '  var rmBtn=document.createElement("button");rmBtn.onclick=function(){rimuoviRiga(this);};rmBtn.style.cssText="background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:3px 6px";rmBtn.innerHTML="&#10005;";' +
+        '  tr.appendChild(td("padding:9px 11px",""));tr.firstChild.appendChild(siglaEl);' +
+        '  tr.appendChild(cell2);' +
+        '  tr.appendChild(td("padding:9px 11px",""));tr.children[2].appendChild(badge);' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:right;font-weight:600",p.anno1?("\u20ac "+p.anno1.toLocaleString("it-IT")):"\u2014"));' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:right;font-weight:600",p.mens?("\u20ac "+p.mens+"/mese"):"\u2014"));' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:center;width:28px",""));tr.lastChild.appendChild(rmBtn);' +
+        '  tb.appendChild(tr);aggiornaTotProp();chiudiListinoProp();_PS=null;' +
+        '}' +
+        'function chiudiListinoProp(){document.getElementById("prop-listino-overlay").style.display="none";}' +
+        '</script>' +
         '</div>';
     } catch(propErr) {
       propostaHtml = '';
@@ -908,7 +959,9 @@ app.post('/analisi-html', async function(req, res) {
           '<div style="font-size:8pt;color:#aaa;font-style:italic" contenteditable="true">'+p.motivazione+'</div></td>' +
           '<td style="padding:9px 11px"><span style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt">'+p.cat+'</span></td>' +
           '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.anno1?'&euro; '+p.anno1.toLocaleString('it-IT'):'&mdash;')+'</td>' +
-          '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td></tr>';
+          '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td>' +
+          '<td style="padding:9px 11px;text-align:center;width:28px"><button onclick="rimuoviRiga(this)" style="background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:3px 6px" title="Rimuovi">&#10005;</button></td>' +
+          '</tr>';
       }).join('');
 
       propostaHtml =
@@ -919,21 +972,70 @@ app.post('/analisi-html', async function(req, res) {
         '<span>Consulente: <strong contenteditable="true" style="color:#1a1a1a">Consulente Pagine Si!</strong></span>' +
         '<span>Data: '+oggiP+'</span><span>Valida fino: '+scadP+'</span></div>' +
         '<div style="background:#fff9e6;border:1px solid #ffe082;border-radius:7px;padding:9px 14px;margin-bottom:14px;font-size:9.5pt;color:#795548">Clicca sui testi per modificarli</div>' +
-        '<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
+        '<table id="prop-tbl" style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
         '<thead><tr style="background:#111;color:white">' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Sigla</th>' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Prodotto</th>' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Area</th>' +
         '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Anno 1</th>' +
-        '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Mensile</th></tr></thead>' +
+        '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Mensile</th>' +
+        '<th style="width:28px"></th></tr></thead>' +
         '<tbody>'+righe+'</tbody></table>' +
         '<div style="background:#111;color:white;border-radius:8px;padding:16px 22px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:12px">' +
         '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Investimento Anno 1</div>' +
-        '<div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; '+tot1.toLocaleString('it-IT')+'</div>' +
+        '<div style="font-size:18pt;font-weight:800;color:#E8001C" id="prop-tot1">&euro; '+tot1.toLocaleString('it-IT')+'</div>' +
         '<div style="font-size:8pt;color:rgba(255,255,255,0.3)">IVA esclusa</div></div>' +
         '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Canone Mensile</div>' +
-        '<div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; '+totM+'<span style="font-size:10pt;color:rgba(255,255,255,0.4)">/mese</span></div></div></div>' +
+        '<div style="font-size:18pt;font-weight:800;color:#E8001C" id="prop-totm">&euro; '+totM+'<span style="font-size:10pt;color:rgba(255,255,255,0.4)">/mese</span></div></div></div>' +
         '<div style="font-size:8.5pt;color:#bbb;text-align:center;margin-bottom:32px">Pagine Si! SpA &middot; paginesispa.it &middot; Prezzi IVA esclusa</div>' +
+        '<tfoot><tr><td colspan="6" style="padding:8px 11px;border-top:2px dashed #f0f0f0;background:#fafafa">' +
+        '<button onclick="apriListinoProp()" style="padding:5px 12px;background:#fff;border:1.5px dashed #E8001C;color:#E8001C;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer">+ Aggiungi dal listino</button>' +
+        '</td></tr></tfoot>' +
+        '</table>' +
+        '<div id="prop-listino-overlay" onclick="if(event.target===this)chiudiListinoProp()" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:9999;align-items:center;justify-content:center">' +
+        '<div style="background:#fff;border-radius:14px;width:660px;max-width:95vw;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.2)">' +
+        '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between"><div style="font-size:13px;font-weight:700">Aggiungi servizio</div><button onclick="chiudiListinoProp()" style="width:26px;height:26px;border-radius:50%;border:none;background:#f0f0f0;cursor:pointer">&#10005;</button></div>' +
+        '<div id="prop-listino-body" style="overflow-y:auto;padding:16px 18px;flex:1"></div>' +
+        '<div style="padding:10px 18px;border-top:1px solid #eee;background:#f9f9f9;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#aaa">Seleziona un servizio</span><button id="prop-btn-add" onclick="aggiungiDaListinoProp()" disabled style="padding:7px 16px;background:#E8001C;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;opacity:0.4">Aggiungi</button></div>' +
+        '</div></div>' +
+        '<script>' +
+        'var _PL='+JSON.stringify(PRODOTTI)+';var _PS=null;' +
+        'function rimuoviRiga(btn){var tr=btn.closest("tr");if(tr){tr.remove();aggiornaTotProp();}}' +
+        'function aggiornaTotProp(){var a=0,m=0;document.querySelectorAll("#prop-tbl tbody tr").forEach(function(tr){a+=parseFloat(tr.dataset.a1||0);m+=parseFloat(tr.dataset.mn||0);});var t1=document.getElementById("prop-tot1");var tm=document.getElementById("prop-totm");if(t1)t1.textContent=a.toLocaleString("it-IT");if(tm)tm.textContent=m;}' +
+        'function apriListinoProp(){' +
+        '  var cats={"Sito Web":["Si2A-PM","Si2RE-PM","Si2S-PM","Si2VN-PM"],"Directory":["WDSAL","WDSA"],"Google Maps":["GBP","GBPP","GBPAdv"],"Reputazione":["ISTQQ","ISTBS","ISTPS"],"Social":["SOC-SET","SOC-BAS","SOC-START","SOC-WEEK","SOC-FULL"],"SEO":["SIN","SMN","BLS10P"],"Google Ads":["ADW-E","ADW-S","SIADVLS","SIADVLG"],"Video":["VS1","VS4","VST30","VP"],"AI":["AI-ADLSET","AI-ADLABB"],"eCommerce":["EC-SMART","EC-GLOB"],"Automation":["Si4BLD","Si4BEN"]};' +
+        '  var body=document.getElementById("prop-listino-body");body.innerHTML="";' +
+        '  for(var cat in cats){' +
+        '    var wrap=document.createElement("div");wrap.style.marginBottom="14px";' +
+        '    var lbl=document.createElement("div");lbl.style.cssText="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;margin-bottom:6px";lbl.textContent=cat;wrap.appendChild(lbl);' +
+        '    var row=document.createElement("div");row.style.cssText="display:flex;flex-wrap:wrap;gap:4px";' +
+        '    cats[cat].forEach(function(s){var p=_PL[s];if(!p)return;var pr=p.mens?("\u20ac"+p.mens+"/mese"):(p.anno1?("\u20ac"+p.anno1+"/anno"):"");var btn=document.createElement("button");btn.id="plc-"+s;btn.dataset.sigla=s;btn.onclick=function(){selPL(this,this.dataset.sigla);};btn.style.cssText="padding:3px 9px;border-radius:12px;border:1.5px solid #e0e0e0;background:#fff;cursor:pointer;font-size:10px;color:#555;margin:2px";var b=document.createElement("b");b.style.cssText="font-family:monospace;color:#E8001C";b.textContent=s;btn.appendChild(b);btn.appendChild(document.createTextNode(" "+p.nome+" "+pr));row.appendChild(btn);});' +
+        '    wrap.appendChild(row);body.appendChild(wrap);' +
+        '  }' +
+        '  document.getElementById("prop-listino-overlay").style.display="flex";' +
+        '}' +
+        'function selPL(el,s){document.querySelectorAll("[id^=plc-]").forEach(function(e){e.style.background="#fff";e.style.borderColor="#e0e0e0";e.style.color="#555";});_PS=s;el.style.background="#E8001C";el.style.borderColor="#E8001C";el.style.color="#fff";var b=document.getElementById("prop-btn-add");if(b){b.disabled=false;b.style.opacity="1";}}' +
+        'function aggiungiDaListinoProp(){' +
+        '  if(!_PS)return;var p=_PL[_PS];if(!p)return;' +
+        '  var tb=document.querySelector("#prop-tbl tbody");' +
+        '  var tr=document.createElement("tr");tr.dataset.a1=p.anno1||0;tr.dataset.mn=p.mens||0;tr.style.borderBottom="1px solid #f0f0f0";' +
+        '  function td(style,content){var c=document.createElement("td");c.style.cssText=style;if(typeof content==="string")c.innerHTML=content;else c.appendChild(content);return c;}' +
+        '  var siglaEl=document.createElement("div");siglaEl.style.cssText="font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600";siglaEl.textContent=_PS;' +
+        '  var nomeEl=document.createElement("div");nomeEl.contentEditable="true";nomeEl.style.cssText="font-weight:600;margin-bottom:2px";nomeEl.textContent=p.nome;' +
+        '  var descEl=document.createElement("div");descEl.contentEditable="true";descEl.style.cssText="font-size:8.5pt;color:#777";descEl.textContent=p.desc;' +
+        '  var cell2=document.createElement("td");cell2.style.padding="9px 11px";cell2.appendChild(nomeEl);cell2.appendChild(descEl);' +
+        '  var badge=document.createElement("span");badge.style.cssText="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt";badge.textContent=p.cat;' +
+        '  var rmBtn=document.createElement("button");rmBtn.onclick=function(){rimuoviRiga(this);};rmBtn.style.cssText="background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:3px 6px";rmBtn.innerHTML="&#10005;";' +
+        '  tr.appendChild(td("padding:9px 11px",""));tr.firstChild.appendChild(siglaEl);' +
+        '  tr.appendChild(cell2);' +
+        '  tr.appendChild(td("padding:9px 11px",""));tr.children[2].appendChild(badge);' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:right;font-weight:600",p.anno1?("\u20ac "+p.anno1.toLocaleString("it-IT")):"\u2014"));' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:right;font-weight:600",p.mens?("\u20ac "+p.mens+"/mese"):"\u2014"));' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:center;width:28px",""));tr.lastChild.appendChild(rmBtn);' +
+        '  tb.appendChild(tr);aggiornaTotProp();chiudiListinoProp();_PS=null;' +
+        '}' +
+        'function chiudiListinoProp(){document.getElementById("prop-listino-overlay").style.display="none";}' +
+        '</script>' +
         '</div>';
     } catch(propErr) {
       propostaHtml = '';
@@ -1069,7 +1171,7 @@ app.post('/analisi-compute', async function(req, res) {
     // 3. Recensioni
     var recensioni = null;
     if (recTaskId) {
-      for (var a=0; a<8; a++) {
+      for (var a=0; a<3; a++) {
         await new Promise(function(r){ setTimeout(r,2000); });
         try {
           var gr = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_get/'+recTaskId, { headers:{'Authorization':dfsAuth()} });
@@ -1129,7 +1231,7 @@ app.post('/analisi-compute', async function(req, res) {
         '<span>Data: '+oggi2+'</span><span>Valida fino al: '+scad+'</span>' +
         '<span>Consulente: <strong style="color:#1a1a1a" id="consulente-nome" contenteditable="true">Consulente Pagine Si!</strong></span></div>' +
         '<div style="background:#fff9e6;border:1px solid #ffe082;border-radius:7px;padding:9px 14px;margin-bottom:14px;font-size:9.5pt;color:#795548" class="no-print">Clicca sui testi per modificarli</div>' +
-        '<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
+        '<table id="prop-tbl" style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
         '<thead><tr style="background:#111;color:white"><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Sigla</th><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Prodotto</th><th style="padding:8px 10px;text-align:left;font-size:8.5pt">Area</th><th style="padding:8px 10px;text-align:right;font-size:8.5pt">Anno 1</th><th style="padding:8px 10px;text-align:right;font-size:8.5pt">Mensile</th></tr></thead>' +
         '<tbody>'+righe+'</tbody></table>' +
         '<div style="background:#111;color:white;border-radius:8px;padding:16px 22px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:16px">' +
@@ -1230,7 +1332,9 @@ app.post('/analisi-compute', async function(req, res) {
           '<div style="font-size:8pt;color:#aaa;font-style:italic" contenteditable="true">'+p.motivazione+'</div></td>' +
           '<td style="padding:9px 11px"><span style="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt">'+p.cat+'</span></td>' +
           '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.anno1?'&euro; '+p.anno1.toLocaleString('it-IT'):'&mdash;')+'</td>' +
-          '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td></tr>';
+          '<td style="padding:9px 11px;text-align:right;font-weight:600;white-space:nowrap">'+(p.mens?'&euro; '+p.mens+'/mese':'&mdash;')+'</td>' +
+          '<td style="padding:9px 11px;text-align:center;width:28px"><button onclick="rimuoviRiga(this)" style="background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:3px 6px" title="Rimuovi">&#10005;</button></td>' +
+          '</tr>';
       }).join('');
 
       propostaHtml =
@@ -1241,21 +1345,70 @@ app.post('/analisi-compute', async function(req, res) {
         '<span>Consulente: <strong contenteditable="true" style="color:#1a1a1a">Consulente Pagine Si!</strong></span>' +
         '<span>Data: '+oggiP+'</span><span>Valida fino: '+scadP+'</span></div>' +
         '<div style="background:#fff9e6;border:1px solid #ffe082;border-radius:7px;padding:9px 14px;margin-bottom:14px;font-size:9.5pt;color:#795548">Clicca sui testi per modificarli</div>' +
-        '<table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
+        '<table id="prop-tbl" style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:9.5pt">' +
         '<thead><tr style="background:#111;color:white">' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Sigla</th>' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Prodotto</th>' +
         '<th style="padding:9px 11px;text-align:left;font-size:8.5pt">Area</th>' +
         '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Anno 1</th>' +
-        '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Mensile</th></tr></thead>' +
+        '<th style="padding:9px 11px;text-align:right;font-size:8.5pt">Mensile</th>' +
+        '<th style="width:28px"></th></tr></thead>' +
         '<tbody>'+righe+'</tbody></table>' +
         '<div style="background:#111;color:white;border-radius:8px;padding:16px 22px;display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:12px">' +
         '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Investimento Anno 1</div>' +
-        '<div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; '+tot1.toLocaleString('it-IT')+'</div>' +
+        '<div style="font-size:18pt;font-weight:800;color:#E8001C" id="prop-tot1">&euro; '+tot1.toLocaleString('it-IT')+'</div>' +
         '<div style="font-size:8pt;color:rgba(255,255,255,0.3)">IVA esclusa</div></div>' +
         '<div style="text-align:center"><div style="font-size:8pt;color:rgba(255,255,255,0.5);text-transform:uppercase;margin-bottom:3px">Canone Mensile</div>' +
-        '<div style="font-size:18pt;font-weight:800;color:#E8001C">&euro; '+totM+'<span style="font-size:10pt;color:rgba(255,255,255,0.4)">/mese</span></div></div></div>' +
+        '<div style="font-size:18pt;font-weight:800;color:#E8001C" id="prop-totm">&euro; '+totM+'<span style="font-size:10pt;color:rgba(255,255,255,0.4)">/mese</span></div></div></div>' +
         '<div style="font-size:8.5pt;color:#bbb;text-align:center;margin-bottom:32px">Pagine Si! SpA &middot; paginesispa.it &middot; Prezzi IVA esclusa</div>' +
+        '<tfoot><tr><td colspan="6" style="padding:8px 11px;border-top:2px dashed #f0f0f0;background:#fafafa">' +
+        '<button onclick="apriListinoProp()" style="padding:5px 12px;background:#fff;border:1.5px dashed #E8001C;color:#E8001C;border-radius:6px;font-size:10px;font-weight:600;cursor:pointer">+ Aggiungi dal listino</button>' +
+        '</td></tr></tfoot>' +
+        '</table>' +
+        '<div id="prop-listino-overlay" onclick="if(event.target===this)chiudiListinoProp()" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:9999;align-items:center;justify-content:center">' +
+        '<div style="background:#fff;border-radius:14px;width:660px;max-width:95vw;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.2)">' +
+        '<div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between"><div style="font-size:13px;font-weight:700">Aggiungi servizio</div><button onclick="chiudiListinoProp()" style="width:26px;height:26px;border-radius:50%;border:none;background:#f0f0f0;cursor:pointer">&#10005;</button></div>' +
+        '<div id="prop-listino-body" style="overflow-y:auto;padding:16px 18px;flex:1"></div>' +
+        '<div style="padding:10px 18px;border-top:1px solid #eee;background:#f9f9f9;display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;color:#aaa">Seleziona un servizio</span><button id="prop-btn-add" onclick="aggiungiDaListinoProp()" disabled style="padding:7px 16px;background:#E8001C;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;opacity:0.4">Aggiungi</button></div>' +
+        '</div></div>' +
+        '<script>' +
+        'var _PL='+JSON.stringify(PRODOTTI)+';var _PS=null;' +
+        'function rimuoviRiga(btn){var tr=btn.closest("tr");if(tr){tr.remove();aggiornaTotProp();}}' +
+        'function aggiornaTotProp(){var a=0,m=0;document.querySelectorAll("#prop-tbl tbody tr").forEach(function(tr){a+=parseFloat(tr.dataset.a1||0);m+=parseFloat(tr.dataset.mn||0);});var t1=document.getElementById("prop-tot1");var tm=document.getElementById("prop-totm");if(t1)t1.textContent=a.toLocaleString("it-IT");if(tm)tm.textContent=m;}' +
+        'function apriListinoProp(){' +
+        '  var cats={"Sito Web":["Si2A-PM","Si2RE-PM","Si2S-PM","Si2VN-PM"],"Directory":["WDSAL","WDSA"],"Google Maps":["GBP","GBPP","GBPAdv"],"Reputazione":["ISTQQ","ISTBS","ISTPS"],"Social":["SOC-SET","SOC-BAS","SOC-START","SOC-WEEK","SOC-FULL"],"SEO":["SIN","SMN","BLS10P"],"Google Ads":["ADW-E","ADW-S","SIADVLS","SIADVLG"],"Video":["VS1","VS4","VST30","VP"],"AI":["AI-ADLSET","AI-ADLABB"],"eCommerce":["EC-SMART","EC-GLOB"],"Automation":["Si4BLD","Si4BEN"]};' +
+        '  var body=document.getElementById("prop-listino-body");body.innerHTML="";' +
+        '  for(var cat in cats){' +
+        '    var wrap=document.createElement("div");wrap.style.marginBottom="14px";' +
+        '    var lbl=document.createElement("div");lbl.style.cssText="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;margin-bottom:6px";lbl.textContent=cat;wrap.appendChild(lbl);' +
+        '    var row=document.createElement("div");row.style.cssText="display:flex;flex-wrap:wrap;gap:4px";' +
+        '    cats[cat].forEach(function(s){var p=_PL[s];if(!p)return;var pr=p.mens?("\u20ac"+p.mens+"/mese"):(p.anno1?("\u20ac"+p.anno1+"/anno"):"");var btn=document.createElement("button");btn.id="plc-"+s;btn.dataset.sigla=s;btn.onclick=function(){selPL(this,this.dataset.sigla);};btn.style.cssText="padding:3px 9px;border-radius:12px;border:1.5px solid #e0e0e0;background:#fff;cursor:pointer;font-size:10px;color:#555;margin:2px";var b=document.createElement("b");b.style.cssText="font-family:monospace;color:#E8001C";b.textContent=s;btn.appendChild(b);btn.appendChild(document.createTextNode(" "+p.nome+" "+pr));row.appendChild(btn);});' +
+        '    wrap.appendChild(row);body.appendChild(wrap);' +
+        '  }' +
+        '  document.getElementById("prop-listino-overlay").style.display="flex";' +
+        '}' +
+        'function selPL(el,s){document.querySelectorAll("[id^=plc-]").forEach(function(e){e.style.background="#fff";e.style.borderColor="#e0e0e0";e.style.color="#555";});_PS=s;el.style.background="#E8001C";el.style.borderColor="#E8001C";el.style.color="#fff";var b=document.getElementById("prop-btn-add");if(b){b.disabled=false;b.style.opacity="1";}}' +
+        'function aggiungiDaListinoProp(){' +
+        '  if(!_PS)return;var p=_PL[_PS];if(!p)return;' +
+        '  var tb=document.querySelector("#prop-tbl tbody");' +
+        '  var tr=document.createElement("tr");tr.dataset.a1=p.anno1||0;tr.dataset.mn=p.mens||0;tr.style.borderBottom="1px solid #f0f0f0";' +
+        '  function td(style,content){var c=document.createElement("td");c.style.cssText=style;if(typeof content==="string")c.innerHTML=content;else c.appendChild(content);return c;}' +
+        '  var siglaEl=document.createElement("div");siglaEl.style.cssText="font-family:monospace;font-size:8.5pt;color:#E8001C;font-weight:600";siglaEl.textContent=_PS;' +
+        '  var nomeEl=document.createElement("div");nomeEl.contentEditable="true";nomeEl.style.cssText="font-weight:600;margin-bottom:2px";nomeEl.textContent=p.nome;' +
+        '  var descEl=document.createElement("div");descEl.contentEditable="true";descEl.style.cssText="font-size:8.5pt;color:#777";descEl.textContent=p.desc;' +
+        '  var cell2=document.createElement("td");cell2.style.padding="9px 11px";cell2.appendChild(nomeEl);cell2.appendChild(descEl);' +
+        '  var badge=document.createElement("span");badge.style.cssText="background:#f5f5f5;padding:2px 8px;border-radius:4px;font-size:8.5pt";badge.textContent=p.cat;' +
+        '  var rmBtn=document.createElement("button");rmBtn.onclick=function(){rimuoviRiga(this);};rmBtn.style.cssText="background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:3px 6px";rmBtn.innerHTML="&#10005;";' +
+        '  tr.appendChild(td("padding:9px 11px",""));tr.firstChild.appendChild(siglaEl);' +
+        '  tr.appendChild(cell2);' +
+        '  tr.appendChild(td("padding:9px 11px",""));tr.children[2].appendChild(badge);' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:right;font-weight:600",p.anno1?("\u20ac "+p.anno1.toLocaleString("it-IT")):"\u2014"));' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:right;font-weight:600",p.mens?("\u20ac "+p.mens+"/mese"):"\u2014"));' +
+        '  tr.appendChild(td("padding:9px 11px;text-align:center;width:28px",""));tr.lastChild.appendChild(rmBtn);' +
+        '  tb.appendChild(tr);aggiornaTotProp();chiudiListinoProp();_PS=null;' +
+        '}' +
+        'function chiudiListinoProp(){document.getElementById("prop-listino-overlay").style.display="none";}' +
+        '</script>' +
         '</div>';
     } catch(propErr) {
       propostaHtml = '';
