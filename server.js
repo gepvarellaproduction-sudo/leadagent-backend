@@ -577,6 +577,13 @@ app.post('/analisi', async function(req, res) {
       propostaHtml +
       '</div></div>' +
       '<script>' +
+      'var B="https://leadagent-backend.onrender.com";' +
+      '(function(){var SP='+strategiaPayload+';' +
+      'fetch(B+"/analisi-strategica",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(SP)})' +
+      '.then(function(r){return r.json();})' +
+      '.then(function(d){var el=document.getElementById("strategia-content");if(el&&d.testo){el.style.textAlign="left";el.style.color="#1a1a1a";el.innerHTML=\'<p>\'+d.testo+\'</p>\'; }else if(el){el.innerHTML="Analisi non disponibile.";}})' +
+      '.catch(function(){var el=document.getElementById("strategia-content");if(el)el.innerHTML="Analisi non disponibile.";});' +
+      '})();' +
       'function mostraProposta(){var s=document.getElementById("proposta-section");if(s){s.style.display="block";setTimeout(function(){s.scrollIntoView({behavior:"smooth"});},100);}var btn=document.getElementById("btn-mostra-prop");if(btn){btn.style.display="none";}}' +
       'function apriAntNuovaTab(){' +
       '  var btn=document.getElementById("ba");if(btn){btn.disabled=true;btn.textContent="Generazione...";}' +
@@ -1475,6 +1482,43 @@ app.post('/preview-form', async function(req, res) {
     res.send(html);
   } catch(err) {
     res.status(500).send('<html><body>Errore: ' + err.message + '</body></html>');
+  }
+});
+
+
+app.post('/analisi-strategica', async function(req, res) {
+  try {
+    var d = req.body;
+    var recTesti = d.recensioni_testi || 'nessuna';
+    var datiStr = [
+      'Attivita: '+d.nome+' ('+d.categoria+' a '+d.citta+')',
+      'Sito: '+(d.web||'nessun sito'),
+      'Rating: '+(d.rating||'N/D')+'/5 con '+(d.nRating||0)+' recensioni',
+      'Pos. Google "'+d.keyword+'": '+d.pos_google,
+      'Pos. Maps: '+d.pos_maps,
+      'Facebook: '+d.facebook,
+      'Instagram: '+d.instagram,
+      'Recensioni: '+(d.recensioni_perc !== null ? d.recensioni_perc+'% risposte su '+d.recensioni_campione+', '+d.recensioni_pos+' pos, '+d.recensioni_neg+' neg' : 'N/D'),
+      'Ultime rec: '+recTesti,
+      'Competitor: '+d.competitor
+    ].join('\n');
+    var prompt = 'Sei un senior digital marketing strategist italiano per PMI locali. Analizza questi dati reali.\n\nDATI:\n'+datiStr+'\n\nPRODUCI (max 400 parole, **Titolo** per titoli in grassetto):\n**Situazione Attuale** - 2-3 gap critici con numeri reali\n**Analisi Recensioni** - punti forza, punti deboli, criticita dalle recensioni\n**Obiettivi a 90 Giorni** - 3 obiettivi con numeri specifici\n**Obiettivi a 6 Mesi** - 3 proiezioni concrete\n**Strategia Social** - uso Reels per questa categoria\n**Priorita Intervento** - i 3 servizi Pagine Si! piu urgenti';
+    var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] })
+    });
+    var aiData = await aiResp.json();
+    if (aiData.content && aiData.content[0] && aiData.content[0].text) {
+      var testo = aiData.content[0].text
+        .split('**').map(function(t,i){ return i%2===1 ? '<strong>'+t+'</strong>' : t; }).join('')
+        .split('\n\n').join('</p><p style="margin-bottom:10px">')
+        .split('\n').join('<br>');
+      return res.json({ testo: testo });
+    }
+    res.json({ testo: '' });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
