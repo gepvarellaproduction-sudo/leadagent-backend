@@ -268,6 +268,37 @@ app.post('/analisi', async function(req, res) {
       }
     }
 
+    // Analisi strategica Claude - generata qui, non in background
+    var strategia = '';
+    try {
+      var recTesti = recensioni&&recensioni.testi ? recensioni.testi.slice(0,10).map(function(r){return (r.rating||'?')+'/5: '+r.testo.slice(0,80);}).join(' | ') : 'nessuna';
+      var datiStr = [
+        'Attivita: '+nome+' ('+categoria+' a '+citta+')',
+        'Sito: '+(web||'assente'),
+        'Rating: '+(rating||'N/D')+'/5 con '+nRating+' recensioni',
+        'Posizione Google: '+(seo&&seo.posizione?'#'+seo.posizione:'non trovato'),
+        'Posizione Maps: '+(mapsPos?'#'+mapsPos:'non trovato'),
+        'Facebook: '+(social.facebook?'presente':'assente'),
+        'Instagram: '+(social.instagram?'presente':'assente'),
+        'Recensioni: '+(recensioni?recensioni.perc_risposta+'% risposte su '+recensioni.campione+', '+recensioni.positive+' pos, '+recensioni.negative+' neg':'N/D'),
+        'Ultime: '+recTesti,
+        'Competitor: '+competitor.map(function(c){return c.nome+' Maps#'+c.posizione_maps+(c.posizione_serp?'/Google#'+c.posizione_serp:'')+' '+(c.rating||'N/D')+'/5';}).join(', ')
+      ].join('\n');
+      var prompt = 'Sei un senior digital marketing strategist italiano per PMI locali. Analizza questi dati reali e produci una analisi strategica completa.\n\nDATI REALI:\n'+datiStr+'\n\nPRODUCI (usa **Titolo** in grassetto per ogni sezione, sii specifico con numeri reali):\n\n**Situazione Attuale**\nDescrivi i 3-4 gap critici piu urgenti con numeri reali, posizioni esatte, confronti competitor.\n\n**Analisi Recensioni**\nPunti di forza, punti deboli ricorrenti e criticita operative.\n\n**Obiettivi a 90 Giorni**\n4 obiettivi SMART con numeri precisi.\n\n**Obiettivi a 6 Mesi**\n4 proiezioni concrete con stima impatto.\n\n**Strategia Social Media**\nStrateia Reels per questa categoria specifica. 5 idee di contenuto concrete.\n\n**Priorita di Intervento**\nI 3 servizi Pagine Si! piu urgenti con motivazione basata sui dati.';
+      var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] })
+      });
+      var aiData = await aiResp.json();
+      if (aiData.content && aiData.content[0] && aiData.content[0].text) {
+        strategia = aiData.content[0].text
+          .split('**').map(function(t,i){ return i%2===1 ? '<strong>'+t+'</strong>' : t; }).join('')
+          .split('\n\n').join('</p><p style="margin-bottom:10px">')
+          .split('\n').join('<br>');
+      }
+    } catch(e) {}
+
     var ai = calcolaAI(web, social, nRating, rating, seo);
     var oggi = new Date().toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
     var sec = 'font-size:10pt;font-weight:700;color:#E8001C;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:12px;padding-bottom:6px;border-bottom:2px solid #E8001C';
@@ -353,12 +384,14 @@ app.post('/analisi', async function(req, res) {
     body += '</div></div></div></div>';
 
     // ANALISI STRATEGICA - skeleton caricato in background
-    body += '<div style="margin-bottom:24px" id="str-wrap"><div style="'+sec+'">Analisi Strategica e Obiettivi</div><div id="str-content" style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;text-align:center;color:#aaa;font-size:9.5pt"><div style="font-size:1.5rem;margin-bottom:8px">&#8987;</div>Analisi in corso...</div></div>';
+    if (strategia) {
+      body += '<div style="margin-bottom:24px"><div style="'+sec+'">Analisi Strategica e Obiettivi</div><div style="border:1.5px solid #E8001C;border-radius:8px;padding:18px 20px;font-size:9.5pt;color:#1a1a1a;line-height:1.7"><p style="margin-bottom:10px">'+strategia+'</p></div></div>';
+    }
 
     // Tasto proposta - genera al click leggendo i dati analisi
     var tastoP =
       '<div style="margin-top:32px;padding:20px 0;text-align:center" class="no-print">'+
-      '<button id="btn-prop" onclick="genProp()" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>'+
+      '<button id="btn-prop" onclick="this.disabled=true;this.textContent=\'Generazione...\';var cont=document.getElementById(\'prop-container\');if(cont)cont.innerHTML=\'<div style=\\"padding:24px;text-align:center;color:#aaa\\">&#8987; Generazione proposta...</div>\';fetch(\'https://leadagent-backend.onrender.com/proposal\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({lead:L,consulente:\'Consulente Pagine Si!\'})}).then(function(r){return r.json();}).then(function(d){if(d.html&&cont){var b=new Blob([d.html],{type:\'text/html;charset=utf-8\'});var u=URL.createObjectURL(b);var a=document.createElement(\'a\');a.href=u;a.target=\'_blank\';a.rel=\'noreferrer\';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u);},60000);}document.getElementById(\'btn-prop\').disabled=false;document.getElementById(\'btn-prop\').textContent=\'Genera Proposta Commerciale\';}).catch(function(){document.getElementById(\'btn-prop\').disabled=false;document.getElementById(\'btn-prop\').textContent=\'Genera Proposta Commerciale\';});" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>'+
       '<div style="font-size:9pt;color:#aaa;margin-top:8px">Generata leggendo l\'analisi appena prodotta</div></div>'+
       '<div id="prop-container"></div>';
 
@@ -406,13 +439,7 @@ app.post('/analisi', async function(req, res) {
       'var SP='+sp+';'+
       'var _LP='+lp+';var _S=null;'+
       // Carica analisi strategica in background
-      '(function(){fetch(B+"/analisi-strategica",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(SP)})'+
-      '.then(function(r){return r.json();})'+
-      '.then(function(d){var el=document.getElementById("str-content");if(el&&d.testo){el.style.textAlign="left";el.style.color="#1a1a1a";var p=document.createElement("p");p.style.marginBottom="10px";p.innerHTML=d.testo;el.innerHTML="";el.appendChild(p);}else if(el){el.innerHTML="Analisi non disponibile.";}})'+
-      '.catch(function(){var el=document.getElementById("str-content");if(el)el.innerHTML="Analisi non disponibile.";});'+
-      '})();'+
       // Mostra proposta
-      'function genProp(){var btn=document.getElementById("btn-prop");if(btn){btn.disabled=true;btn.textContent="Generazione in corso...";}var cont=document.getElementById("prop-container");if(cont)cont.innerHTML="<div style=\"padding:24px;text-align:center;color:#aaa\">&#8987; Generazione proposta...</div>";fetch(B+"/proposal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L,consulente:"Consulente Pagine Si!"})}).then(function(r){return r.json();}).then(function(d){if(d.html&&cont){var ifr=document.createElement("iframe");ifr.style.cssText="width:100%;border:none;border-radius:8px;margin-top:16px;min-height:600px";ifr.srcdoc=d.html;ifr.onload=function(){try{ifr.style.height=(ifr.contentWindow.document.body.scrollHeight+40)+"px";}catch(e){}};cont.innerHTML="";cont.appendChild(ifr);setTimeout(function(){cont.scrollIntoView({behavior:"smooth"});},300);}if(btn){btn.disabled=false;btn.textContent="Genera Proposta Commerciale";}}).catch(function(e){if(cont)cont.innerHTML="";if(btn){btn.disabled=false;btn.textContent="Genera Proposta Commerciale";}});}'+
       // Rimuovi riga proposta
       'function rmR(btn){var tr=btn.closest("tr");if(tr){tr.remove();updT();}}'+
       'function updT(){var a=0,m=0;document.querySelectorAll("#ptbl tbody tr").forEach(function(r){a+=parseFloat(r.dataset.a1||0);m+=parseFloat(r.dataset.mn||0);});var t=document.getElementById("pt1");var u=document.getElementById("ptm");if(t)t.textContent=a.toLocaleString("it-IT");if(u)u.textContent=m;}'+
