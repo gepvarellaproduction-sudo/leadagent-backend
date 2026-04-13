@@ -288,7 +288,7 @@ app.post('/analisi', async function(req, res) {
       var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] })
       });
       var aiData = await aiResp.json();
       if (aiData.content && aiData.content[0] && aiData.content[0].text) {
@@ -379,7 +379,7 @@ app.post('/analisi', async function(req, res) {
     // VISIBILITA AI
     body += '<div style="margin-bottom:24px"><div style="'+sec+'">Visibilita su AI (Gemini, ChatGPT)</div><div style="display:flex;gap:14px;flex-wrap:wrap">';
     body += '<div style="'+box+';flex-shrink:0;text-align:center;min-width:100px"><div style="font-size:3rem;font-weight:800;color:'+ai.colore+'">'+ai.score+'</div><div style="font-size:8.5pt;color:'+ai.colore+';font-weight:700;margin-top:4px">'+ai.livello+'</div><div style="font-size:8pt;color:#aaa">su 100</div></div>';
-    body += '<div style="flex:1;'+box+'"><div style="font-size:9pt;color:#555;margin-bottom:8px">Le AI generative citano attivita presenti su fonti autorevoli. Piu fonti = piu probabilita per "'+categoria+' a '+citta+'".</div><div style="display:flex;flex-direction:column;gap:4px">';
+    body += '<div style="flex:1;'+box+'"><div style="font-size:9pt;color:#555;margin-bottom:8px">Le AI generative (Gemini, ChatGPT) citano le attivita presenti su fonti che scansionano: Google Maps, sito web, social, stampa locale. Piu fonti presenti = piu probabilita di essere citati per "'+categoria+' a '+citta+'".</div><div style="display:flex;flex-direction:column;gap:4px">';
     ai.dettagli.forEach(function(d){ var isP=d.indexOf('ottimo')>-1||d.indexOf('buono')>-1||d.indexOf('prima')>-1||d.indexOf('presenti')>-1; body += '<div style="font-size:9pt;color:'+(isP?'#2e7d32':'#c62828')+'">'+(isP?'+ ':'- ')+d+'</div>'; });
     body += '</div></div></div></div>';
 
@@ -391,7 +391,7 @@ app.post('/analisi', async function(req, res) {
     // Tasto proposta - genera al click leggendo i dati analisi
     var tastoP =
       '<div style="margin-top:32px;padding:20px 0;text-align:center" class="no-print">'+
-      '<button id="btn-prop" onclick="var me=this;me.disabled=true;me.textContent=\'Generazione...\';fetch(\'https://leadagent-backend.onrender.com/proposal\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({lead:L,consulente:\'Consulente Pagine Si!\'})}).then(function(r){return r.json();}).then(function(d){me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';if(d.html){var b=new Blob([d.html],{type:\'text/html;charset=utf-8\'});var u=URL.createObjectURL(b);var a=document.createElement(\'a\');a.href=u;a.target=\'_blank\';a.rel=\'noreferrer\';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u);},60000);}}).catch(function(){me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';})" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>'+
+      '<button id="btn-prop" onclick="var me=this;me.disabled=true;me.textContent=\'Generazione...\';var tab=window.open(\'about:blank\',\'_blank\');fetch(\'https://leadagent-backend.onrender.com/proposal\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({lead:L,consulente:\'Consulente Pagine Si!\'})}).then(function(r){return r.json();}).then(function(d){me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';if(d.html&&tab&&!tab.closed){tab.document.open();tab.document.write(d.html);tab.document.close();}else if(tab&&!tab.closed){tab.close();}}).catch(function(){me.disabled=false;me.textContent=\'Genera Proposta Commerciale\';if(tab&&!tab.closed)tab.close();})" style="padding:14px 32px;background:#E8001C;color:white;border:none;border-radius:10px;font-size:12pt;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,0,28,0.3)">Genera Proposta Commerciale</button>'+
       '<div style="font-size:9pt;color:#aaa;margin-top:8px">Generata leggendo l\'analisi appena prodotta</div></div>'+
       '<div id="prop-container"></div>';
 
@@ -423,6 +423,7 @@ app.post('/analisi', async function(req, res) {
       '<div style="font-size:9pt;color:#777;display:flex;gap:14px;flex-wrap:wrap">'+
       '<span>'+(lead.indirizzo||'').replace(/[<>]/g,'')+'</span>'+
       (web?'<span>Sito: <a href="'+web+'" target="_blank" style="color:#1565c0">'+web+'</a></span>':'<span style="color:#c62828">Nessun sito</span>')+
+      (lead.telefono&&lead.telefono!=='N/D'?'<span>Tel: <a href="tel:'+lead.telefono+'" style="color:#1565c0">'+lead.telefono+'</a></span>':'')+
       '<span>Rating: '+(rating?rating+'/5 ('+nRating+' rec.)':'N/D')+'</span>'+
       '<span>'+categoria+' '+citta+'</span></div></div>'+
       '<div class="bd"><div class="az">'+
@@ -490,7 +491,7 @@ app.post('/analisi-strategica', async function(req, res) {
     var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1200, messages: [{ role: 'user', content: prompt }] })
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] })
     });
     var aiData = await aiResp.json();
     if (aiData.content && aiData.content[0] && aiData.content[0].text) {
