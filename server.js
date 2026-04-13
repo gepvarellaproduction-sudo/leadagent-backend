@@ -144,7 +144,11 @@ async function cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems) {
     if (!data.places) return out;
     for (var i = 0; i < data.places.length; i++) {
       var n = ((data.places[i].displayName && data.places[i].displayName.text)||'').toLowerCase();
-      if (n.includes(nomeNorm.slice(0,5)) || (webNorm && (data.places[i].websiteUri||'').toLowerCase().includes(webNorm))) {
+      var siteComp = (data.places[i].websiteUri||'').toLowerCase().replace(/^https?:\/\/(www\.)?/,'').split('/')[0];
+      // Match preciso: nome identico o sito identico
+      var nomeMatch = n === nomeNorm || (nomeNorm.length > 4 && n.includes(nomeNorm)) || (nomeNorm.length > 4 && nomeNorm.includes(n) && n.length > 4);
+      var siteMatch = webNorm && siteComp && (siteComp === webNorm || siteComp.includes(webNorm) || webNorm.includes(siteComp));
+      if (nomeMatch || siteMatch) {
         out.posizione_maps_lead = i + 1; break;
       }
     }
@@ -1502,11 +1506,11 @@ app.post('/analisi-strategica', async function(req, res) {
       'Ultime rec: '+recTesti,
       'Competitor: '+d.competitor
     ].join('\n');
-    var prompt = 'Sei un senior digital marketing strategist italiano per PMI locali. Analizza questi dati reali.\n\nDATI:\n'+datiStr+'\n\nPRODUCI (max 400 parole, **Titolo** per titoli in grassetto):\n**Situazione Attuale** - 2-3 gap critici con numeri reali\n**Analisi Recensioni** - punti forza, punti deboli, criticita dalle recensioni\n**Obiettivi a 90 Giorni** - 3 obiettivi con numeri specifici\n**Obiettivi a 6 Mesi** - 3 proiezioni concrete\n**Strategia Social** - uso Reels per questa categoria\n**Priorita Intervento** - i 3 servizi Pagine Si! piu urgenti';
+    var prompt = 'Sei un senior digital marketing strategist italiano specializzato in PMI locali per Pagine Si! SpA.\nAnalizza questi dati reali e produci una analisi strategica completa e dettagliata.\n\nDATI REALI:\n'+datiStr+'\n\nPRODUCI una analisi completa (600-800 parole) con queste sezioni, usa **Titolo** per i titoli:\n\n**Situazione Attuale**\nDescrivi dettagliatamente i 3-4 gap critici piu urgenti usando i numeri reali. Sii specifico: cita posizioni, numeri recensioni, percentuali. Confronta con la media del settore.\n\n**Analisi Recensioni**\nAnalizza in dettaglio i punti di forza emersi dalle recensioni, i punti deboli ricorrenti, le criticita operative da risolvere. Cita esempi concreti dal testo delle recensioni se disponibili.\n\n**Obiettivi a 90 Giorni**\nDefineisci 4 obiettivi SMART con numeri precisi. Esempio: passare da #X a top 10 Google, aumentare le recensioni da N a N+50, raggiungere X% di risposta alle recensioni.\n\n**Obiettivi a 6 Mesi**\n4 proiezioni concrete di crescita con numeri. Includi stima impatto su fatturato.\n\n**Strategia Social Media**\nStrateia dettagliata per Reels Instagram e Facebook per questa specifica categoria. I Reels ottengono 3x piu reach dei post standard. Con 3-4 Reels/settimana le attivita locali registrano +25-40% di visite. Suggerisci 5 idee di contenuto specifiche per questa attivita.\n\n**Priorita di Intervento**\nI 3 servizi Pagine Si! piu urgenti con motivazione dettagliata basata sui dati reali. Quantifica il potenziale impatto di ogni servizio.';
     var aiResp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 700, messages: [{ role: 'user', content: prompt }] })
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] })
     });
     var aiData = await aiResp.json();
     if (aiData.content && aiData.content[0] && aiData.content[0].text) {
