@@ -505,10 +505,10 @@ function generaHTML(lead, prodotti, fatturato, consulente) {
   if (lead.rating && lead.rating >= 4.0) segnaliHTML.push(`<span class="tag ok">\u2705 Rating ${lead.rating}/5</span>`);
 
   const catIcone = {
-    'Sito Web': '&#127760;', 'Directory PagineSi.it': '&#128203;', 'Google Maps': '&#128205;',
-    'Reputazione': '&#11088;', 'Social Media': '&#128241;', 'SEO': '&#128269;',
-    'Google Ads': '&#128226;', 'Social Ads': '&#127919;', 'Video': '&#127916;',
-    'AI': '&#129302;', 'eCommerce': '&#128722;', 'Marketing Automation': '&#9881;'
+    'Sito Web': '\U0001f310', 'Directory PagineSi.it': '\U0001f4cb', 'Google Maps': '\U0001f4cd',
+    'Reputazione': '\u2b50', 'Social Media': '\U0001f4f1', 'SEO': '\U0001f50d',
+    'Google Ads': '\U0001f4e2', 'Social Ads': '\U0001f3af', 'Video': '\U0001f3ac',
+    'AI': '\U0001f916', 'eCommerce': '\U0001f6d2', 'Marketing Automation': '\u2699\ufe0f'
   };
 
   const areeHTML = categorieUsate.map(cat => {
@@ -898,11 +898,22 @@ function esportaPDF() {
 // Endpoint principale
 router.post('/', async (req, res) => {
   try {
-    const { lead, consulente, sigleExtra } = req.body;
+    const { lead, consulente, sigleExtra, analisiReale } = req.body;
     if (!lead) return res.status(400).json({ error: 'Lead mancante' });
 
     const fatturato = stimaFatturato(lead);
     const analisi = analisiDigitale(lead);
+
+    // Arricchisci analisi con dati reali passati dall'analisi digitale
+    if (analisiReale) {
+      analisi.bisogni = analisi.bisogni || {};
+      if (!analisiReale.ha_sito) analisi.bisogni.sito = true;
+      if (analisiReale.pos_google === 'non trovato' || (analisiReale.pos_google && parseInt(analisiReale.pos_google.replace('#','')) > 30)) analisi.bisogni.seo = true;
+      if (!analisiReale.social_ok) analisi.bisogni.social = true;
+      if (analisiReale.rec_perc !== null && analisiReale.rec_perc < 30) analisi.bisogni.reputazione = true;
+      if (analisiReale.rec_neg > 3) analisi.bisogni.reputazione = true;
+    }
+
     let prodotti = costruisciPreventivo(lead, fatturato, analisi);
 
     if (sigleExtra && sigleExtra.length > 0) {
