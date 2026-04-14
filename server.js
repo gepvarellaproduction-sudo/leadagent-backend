@@ -250,20 +250,17 @@ app.post('/analisi', async function(req, res) {
       recTaskId = pd.tasks && pd.tasks[0] && pd.tasks[0].id;
     } catch(e) {}
 
-    // 2. Ricerche parallele
+    // 2. Ricerche parallele + polling recensioni tutto in parallelo
     var ris = await Promise.all([ cercaPosizioneGoogle(nome, web, categoria, citta), cercaSocial(nome, citta) ]);
     var seo = ris[0], social = ris[1];
     var serpItems = (seo && seo.items) || [];
     var keyword = (seo && seo.keyword) || (categoria + ' ' + citta);
 
-    // 3. Competitor Maps
-    var mapsData = await cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems);
-    var competitor = mapsData.competitor, mapsPos = mapsData.posizione_maps_lead;
-
-    // 4. Raccolta recensioni (task avviato ~20s fa)
-    var recensioni = null;
-    if (recTaskId) {
-      for (var a = 0; a < 4; a++) {
+    // 3. Competitor Maps + raccolta recensioni in parallelo
+    // Le due chiamate girano insieme - competitor prende ~8-12s, recensioni prende ~10-15s
+    async function raccogliRecensioni() {
+      if (!recTaskId) return null;
+      for (var a = 0; a < 6; a++) {
         await new Promise(function(r){ setTimeout(r, 2500); });
         try {
           var gr = await fetch('https://api.dataforseo.com/v3/business_data/google/reviews/task_get/'+recTaskId, { headers: { 'Authorization': dfsAuth() } });
@@ -272,7 +269,7 @@ app.post('/analisi', async function(req, res) {
           if (tk && tk.status_code === 20000 && tk.result && tk.result[0]) {
             var r0 = tk.result[0], its = r0.items || [];
             var risp = its.filter(function(r){ return !!r.owner_answer; }).length;
-            recensioni = {
+            return {
               totale_recensioni: nRating || r0.reviews_count || its.length,
               campione: its.length, con_risposta: risp,
               perc_risposta: its.length > 0 ? Math.round((risp/its.length)*100) : 0,
@@ -281,16 +278,21 @@ app.post('/analisi', async function(req, res) {
               testi: its.slice(0,20).map(function(r){ return { rating: r.rating&&r.rating.value, testo: r.review_text||'', ha_risposta: !!r.owner_answer, time_ago: r.time_ago||'' }; }),
               ultima: its[0] ? { rating: its[0].rating&&its[0].rating.value, testo: its[0].review_text||'', ha_risposta: !!its[0].owner_answer, time_ago: its[0].time_ago||'' } : null
             };
-            break;
           }
         } catch(e) {}
       }
+      return null;
     }
+
+    var parallelRes = await Promise.all([ cercaCompetitor(categoria, citta, nomeNorm, webNorm, serpItems), raccogliRecensioni() ]);
+    var mapsData = parallelRes[0];
+    var recensioni = parallelRes[1];
+    var competitor = mapsData.competitor, mapsPos = mapsData.posizione_maps_lead;
 
     // Analisi strategica Claude - generata qui, non in background
     var strategia = '';
     try {
-      var recTesti = recensioni&&recensioni.testi ? recensioni.testi.slice(0,10).map(function(r){return (r.rating||'?')+'/5: '+r.testo.slice(0,80);}).join(' | ') : 'nessuna';
+      var recTesti = recensioni&&recensioni.testi ? recensioni.testi.slice(0,10).map(function(r){return (r.rating||'?')+'/5: '+r.testo.slice(0,80);}).join(' // ') : 'nessuna';
       var datiStr = [
         'Attivita: '+nome+' ('+categoria+' a '+citta+')',
         'Sito: '+(web||'assente'),
@@ -496,7 +498,8 @@ app.post('/analisi', async function(req, res) {
       '  ldiv.style.cssText="padding:24px;text-align:center;color:#aaa";'+
       '  ldiv.innerHTML="&#8987; Generazione proposta...";'+
       '  cont.innerHTML="";cont.appendChild(ldiv);'+
-      '  fetch(B+"/proposal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L,consulente:"Consulente Pagine Si!"})})'+
+      '  var ar={ha_sito:!!(L.web&&L.web!=="N/D"),pos_google:SP.pos_google,pos_maps:SP.pos_maps,rec_perc:SP.recensioni_perc,rec_neg:SP.recensioni_neg,social_ok:(SP.facebook!=="assente"||SP.instagram!=="assente")};'+
+      '  fetch(B+"/proposal",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lead:L,consulente:"Consulente Pagine Si!",analisiReale:ar})})'+
       '  .then(function(r){return r.json();})'+
       '  .then(function(d){'+
       '    me.disabled=false;me.textContent="Genera Proposta Commerciale";'+
