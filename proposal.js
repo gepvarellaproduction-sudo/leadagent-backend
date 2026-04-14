@@ -774,22 +774,39 @@ function apriPannello() {
     'eCommerce': ['EC-SMART','EC-GLOB'],
     'Marketing Automation': ['Si4BLD','Si4BEN'],
   };
-  let html = '';
+  const body = document.getElementById('pannello-body');
+  body.innerHTML = '';
   for (const [cat, sigle] of Object.entries(cats)) {
-    html += '<div style="margin-bottom:16px"><div style="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:7px">' + cat + '</div><div style="display:flex;flex-wrap:wrap;gap:5px">';
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '16px';
+    const lbl = document.createElement('div');
+    lbl.style.cssText = 'font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:7px';
+    lbl.textContent = cat;
+    wrap.appendChild(lbl);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px';
     sigle.forEach(s => {
       const p = LISTINO_COMPLETO[s];
       if (!p) return;
-      const prezzo = p.mens ? '&euro;'+p.mens+'/mese' : (p.anno1 ? '&euro;'+p.anno1+'/anno' : '');
-      html += '<button onclick="selezionaSigla(\''+s+'\')" style="padding:4px 10px;border-radius:14px;border:1.5px solid #e0e0e0;background:#fff;cursor:pointer;font-size:10.5px;color:#555;display:flex;gap:4px;align-items:center" id="chip-'+s+'">'
-        + '<span style="font-family:monospace;font-weight:700;font-size:10px;color:#E8001C">'+s+'</span>'
-        + '<span>'+p.nome+'</span>'
-        + '<span style="opacity:0.5;font-size:9.5px">'+prezzo+'</span>'
-        + '</button>';
+      const prezzo = p.mens ? ''+p.mens+'/mese' : (p.anno1 ? ''+p.anno1+'/anno' : '');
+      const btn = document.createElement('button');
+      btn.id = 'chip-'+s;
+      btn.style.cssText = 'padding:4px 10px;border-radius:14px;border:1.5px solid #e0e0e0;background:#fff;cursor:pointer;font-size:10.5px;color:#555;display:flex;gap:4px;align-items:center';
+      const sp1 = document.createElement('span');
+      sp1.style.cssText = 'font-family:monospace;font-weight:700;font-size:10px;color:#E8001C';
+      sp1.textContent = s;
+      const sp2 = document.createElement('span');
+      sp2.textContent = p.nome;
+      const sp3 = document.createElement('span');
+      sp3.style.cssText = 'opacity:0.5;font-size:9.5px';
+      sp3.textContent = prezzo;
+      btn.appendChild(sp1); btn.appendChild(sp2); btn.appendChild(sp3);
+      btn.addEventListener('click', function() { selezionaSigla(s); });
+      row.appendChild(btn);
     });
-    html += '</div></div>';
+    wrap.appendChild(row);
+    body.appendChild(wrap);
   }
-  document.getElementById('pannello-body').innerHTML = html;
   document.getElementById('pannello-overlay').style.display = 'flex';
 }
 
@@ -820,13 +837,23 @@ function aggiungiServizio() {
   tr.id = 'row-' + idx;
   tr.dataset.anno1 = p.anno1 || 0;
   tr.dataset.mens = p.mens || 0;
-  tr.innerHTML =
-    '<td class="td-sigla">' + s + '</td>' +
-    '<td class="td-prod"><div class="p-nome" contenteditable="true">' + p.nome + '</div><div class="p-desc">' + p.desc + '</div><div class="p-mot" contenteditable="true">>> Aggiunto manualmente</div></td>' +
-    '<td><span class="badge">' + p.cat + '</span></td>' +
-    '<td class="td-num">' + (p.anno1 ? '&euro; ' + p.anno1.toLocaleString('it-IT') : '&mdash;') + '</td>' +
-    '<td class="td-num">' + (p.mens ? '&euro; ' + p.mens + '/mese' : '&mdash;') + '</td>' +
-    '<td class="no-print" style="text-align:center"><button onclick="rimuoviRigaExtra(\'row-' + idx + '\')" style="background:none;border:none;cursor:pointer;color:#ccc;font-size:14px;padding:4px 6px">&#10005;</button></td>';
+  function mkTd(cls, style) { const td = document.createElement('td'); if(cls) td.className=cls; if(style) td.style.cssText=style; return td; }
+  const td0 = mkTd('td-sigla'); td0.textContent = s;
+  const td1 = mkTd('td-prod');
+  const dn = document.createElement('div'); dn.className='p-nome'; dn.contentEditable='true'; dn.textContent=p.nome;
+  const dd = document.createElement('div'); dd.className='p-desc'; dd.textContent=p.desc;
+  const dm = document.createElement('div'); dm.className='p-mot'; dm.contentEditable='true'; dm.textContent='>> Aggiunto manualmente';
+  td1.appendChild(dn); td1.appendChild(dd); td1.appendChild(dm);
+  const td2 = mkTd(); const sp = document.createElement('span'); sp.className='badge'; sp.textContent=p.cat; td2.appendChild(sp);
+  const td3 = mkTd('td-num'); td3.textContent = p.anno1 ? ' ' + p.anno1.toLocaleString('it-IT') : '';
+  const td4 = mkTd('td-num'); td4.textContent = p.mens ? ' ' + p.mens + '/mese' : '';
+  const td5 = mkTd('no-print', 'text-align:center');
+  const rmBtn = document.createElement('button');
+  rmBtn.style.cssText = 'background:none;border:none;cursor:pointer;color:#ccc;font-size:14px;padding:4px 6px';
+  rmBtn.innerHTML = '&#10005;';
+  rmBtn.addEventListener('click', function() { rimuoviRigaExtra('row-' + idx); });
+  td5.appendChild(rmBtn);
+  [td0,td1,td2,td3,td4,td5].forEach(function(td){ tr.appendChild(td); });
   tbody.appendChild(tr);
   ricalcolaTotali();
   chiudiPannello();
