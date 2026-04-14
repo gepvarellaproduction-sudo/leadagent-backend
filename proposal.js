@@ -499,20 +499,20 @@ function generaHTML(lead, prodotti, fatturato, consulente) {
   const categorieUsate = [...new Set(prodotti.map(p => p.cat))];
 
   const segnaliHTML = [];
-  if (!lead.web || lead.web === 'N/D') segnaliHTML.push('<span class="tag bad">\u274c Nessun sito web</span>');
-  if ((lead.nRating || 0) < 20) segnaliHTML.push(`<span class="tag warn">\u26a0\ufe0f ${lead.nRating || 0} recensioni</span>`);
-  if (lead.rating && lead.rating < 3.5) segnaliHTML.push(`<span class="tag bad">\u26a0\ufe0f Rating ${lead.rating}/5</span>`);
-  if (lead.rating && lead.rating >= 4.0) segnaliHTML.push(`<span class="tag ok">\u2705 Rating ${lead.rating}/5</span>`);
+  if (!lead.web || lead.web === 'N/D') segnaliHTML.push('<span class="tag bad">[X] Nessun sito web</span>');
+  if ((lead.nRating || 0) < 20) segnaliHTML.push(`<span class="tag warn">[!] ${lead.nRating || 0} recensioni</span>`);
+  if (lead.rating && lead.rating < 3.5) segnaliHTML.push(`<span class="tag bad">[!] Rating ${lead.rating}/5</span>`);
+  if (lead.rating && lead.rating >= 4.0) segnaliHTML.push(`<span class="tag ok">[OK] Rating ${lead.rating}/5</span>`);
 
   const catIcone = {
-    'Sito Web': '\U0001f310', 'Directory PagineSi.it': '\U0001f4cb', 'Google Maps': '\U0001f4cd',
-    'Reputazione': '\u2b50', 'Social Media': '\U0001f4f1', 'SEO': '\U0001f50d',
-    'Google Ads': '\U0001f4e2', 'Social Ads': '\U0001f3af', 'Video': '\U0001f3ac',
-    'AI': '\U0001f916', 'eCommerce': '\U0001f6d2', 'Marketing Automation': '\u2699\ufe0f'
+    'Sito Web': 'Sito', 'Directory PagineSi.it': 'Dir.', 'Google Maps': 'Maps',
+    'Reputazione': 'Rep.', 'Social Media': 'Social', 'SEO': 'SEO',
+    'Google Ads': 'Ads', 'Social Ads': 'S.Ads', 'Video': 'Video',
+    'AI': 'AI', 'eCommerce': 'eComm.', 'Marketing Automation': 'Auto.'
   };
 
   const areeHTML = categorieUsate.map(cat => {
-    const icona = catIcone[cat] || '\u2022';
+    const icona = catIcone[cat] || '-';
     return `<span class="area-tag">${icona} ${cat}</span>`;
   }).join('');
 
@@ -671,7 +671,7 @@ tr.removable:hover td:first-child::before{opacity:0.3;cursor:pointer}
         <td class="td-prod">
           <div class="p-nome" contenteditable="true">${p.nome}</div>
           <div class="p-desc" contenteditable="true">${p.desc}</div>
-          <div class="p-mot" contenteditable="true">&#128161; ${p.motivazione}</div>
+          <div class="p-mot" contenteditable="true">>> ${p.motivazione}</div>
         </td>
         <td><span class="badge">${p.cat}</span></td>
         <td class="td-num" id="anno1-${i}">${p.anno1 ? '&euro; ' + p.anno1.toLocaleString('it-IT') : '&mdash;'}</td>
@@ -822,7 +822,7 @@ function aggiungiServizio() {
   tr.dataset.mens = p.mens || 0;
   tr.innerHTML =
     '<td class="td-sigla">' + s + '</td>' +
-    '<td class="td-prod"><div class="p-nome" contenteditable="true">' + p.nome + '</div><div class="p-desc">' + p.desc + '</div><div class="p-mot" contenteditable="true">&#128161; Aggiunto manualmente</div></td>' +
+    '<td class="td-prod"><div class="p-nome" contenteditable="true">' + p.nome + '</div><div class="p-desc">' + p.desc + '</div><div class="p-mot" contenteditable="true">>> Aggiunto manualmente</div></td>' +
     '<td><span class="badge">' + p.cat + '</span></td>' +
     '<td class="td-num">' + (p.anno1 ? '&euro; ' + p.anno1.toLocaleString('it-IT') : '&mdash;') + '</td>' +
     '<td class="td-num">' + (p.mens ? '&euro; ' + p.mens + '/mese' : '&mdash;') + '</td>' +
@@ -837,6 +837,15 @@ function rimuoviRigaExtra(id) {
   const row = document.getElementById(id);
   if (row) { row.remove(); ricalcolaTotali(); }
 }
+// Esponi tutte le funzioni a window scope per onclick inline in iframe
+window.rimuoviRiga = rimuoviRiga;
+window.rimuoviRigaExtra = rimuoviRigaExtra;
+window.ricalcolaTotali = ricalcolaTotali;
+window.apriPannello = apriPannello;
+window.chiudiPannello = chiudiPannello;
+window.selezionaSigla = selezionaSigla;
+window.aggiungiServizio = aggiungiServizio;
+window.esportaPDF = esportaPDF;
 
 function esportaPDF() {
   var nomeAz = document.querySelector('.az-nome') ? document.querySelector('.az-nome').textContent.trim() : 'Cliente';
@@ -904,13 +913,14 @@ router.post('/', async (req, res) => {
     const fatturato = stimaFatturato(lead);
     const analisi = analisiDigitale(lead);
 
-    // Arricchisci analisi con dati reali passati dall'analisi digitale
+    // Arricchisci con dati reali dell'analisi
     if (analisiReale) {
       analisi.bisogni = analisi.bisogni || {};
       if (!analisiReale.ha_sito) analisi.bisogni.sito = true;
-      if (analisiReale.pos_google === 'non trovato' || (analisiReale.pos_google && parseInt(analisiReale.pos_google.replace('#','')) > 30)) analisi.bisogni.seo = true;
+      const gPos = analisiReale.pos_google ? parseInt((analisiReale.pos_google+'').replace('#','')) : 999;
+      if (isNaN(gPos) || gPos > 30) analisi.bisogni.seo = true;
       if (!analisiReale.social_ok) analisi.bisogni.social = true;
-      if (analisiReale.rec_perc !== null && analisiReale.rec_perc < 30) analisi.bisogni.reputazione = true;
+      if (analisiReale.rec_perc !== null && analisiReale.rec_perc !== undefined && analisiReale.rec_perc < 30) analisi.bisogni.reputazione = true;
       if (analisiReale.rec_neg > 3) analisi.bisogni.reputazione = true;
     }
 
