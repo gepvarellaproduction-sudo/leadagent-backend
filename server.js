@@ -454,7 +454,7 @@ app.post('/analisi', async function(req, res) {
       '<span>Rating: '+(rating?rating+'/5 ('+nRating+' rec.)':'N/D')+'</span>'+
       '<span>'+categoria+' '+citta+'</span></div></div>'+
       '<div class="bd"><div class="az">'+
-      '<button class="btn br" onclick="window.print()">Stampa / PDF</button>'+
+      '<button class="btn br" onclick="stampaTutto()">Stampa / PDF</button>'+
       '<button class="btn bg" id="ba" onclick="apriAnt()">Anteprima Sito</button>'+
       '<button class="btn bgy" onclick="window.close()">Chiudi</button>'+
       '</div>'+
@@ -490,6 +490,26 @@ app.post('/analisi', async function(req, res) {
       '  .then(function(d){if(d.html&&tab&&!tab.closed){tab.document.open();tab.document.write(d.html);tab.document.close();}if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}})'+
       '  .catch(function(e){if(tab&&!tab.closed)tab.close();if(btn){btn.disabled=false;btn.textContent="Anteprima Sito";}});'+
       '}'+
+      'function stampaTutto(){'+
+      '  var ifr=window._propostaIframe;'+
+      '  if(!ifr){window.print();return;}'+
+      '  var analisiHtml=document.querySelector(".pg").outerHTML;'+
+      '  var propHtml="";'+
+      '  try{propHtml=ifr.contentDocument.body.innerHTML;}catch(e){}'+
+      '  var propStyle="";'+
+      '  try{var ss=ifr.contentDocument.querySelectorAll("style");ss.forEach(function(s){propStyle+=s.textContent;});}catch(e){}'+
+      '  var win=window.open("","_blank");'+
+      '  win.document.write("<!DOCTYPE html><html><head><meta charset=\\"UTF-8\\"><title>Analisi + Proposta</title>"'+
+      '    +"<style>body{font-family:Arial,sans-serif;background:white;color:#1a1a1a;margin:0}@media print{button,.no-print{display:none!important}}</style>"'+
+      '    +"<style>"+propStyle+"</style>"'+
+      '    +"</head><body>"'+
+      '    +analisiHtml'+
+      '    +"<div style=\\"page-break-before:always;padding:40px 52px;\\">"'+
+      '    +propHtml'+
+      '    +"</div></body></html>");'+
+      '  win.document.close();'+
+      '  setTimeout(function(){win.print();},800);'+
+      '}'+
       'function genProposta(){'+
       '  var me=document.getElementById("btn-prop");'+
       '  me.disabled=true;me.textContent="Generazione...";'+
@@ -513,13 +533,7 @@ app.post('/analisi', async function(req, res) {
       '        try{ifr.style.height=(ifr.contentDocument.body.scrollHeight+40)+"px";}catch(e){}'+
       '      };'+
       '      cont.appendChild(ifr);'+
-      '      var btnStampa=document.createElement("button");'+
-      '      btnStampa.textContent="Stampa / Esporta PDF (Analisi + Proposta)";'+
-      '      btnStampa.style.cssText="margin-top:12px;padding:10px 24px;background:#111;color:white;border:none;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer";'+
-      '      btnStampa.onclick=function(){'+
-      '        try{ifr.contentWindow.print();}catch(e){window.print();}'+
-      '      };'+
-      '      cont.appendChild(btnStampa);'+
+      '      window._propostaIframe=ifr;'+
       '      setTimeout(function(){cont.scrollIntoView({behavior:"smooth"});},200);'+
       '    }'+
       '  })'+
